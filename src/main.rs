@@ -1,5 +1,7 @@
 use std::io::{self, BufRead, Write};
 
+const SUCCESS: i32 = 0;
+
 fn print_prompt() {
     print!("db > ");
     io::stdout().flush().expect("Could not print prompt");
@@ -7,7 +9,7 @@ fn print_prompt() {
 
 fn process_input(input_str: &str) {
     if input_str == ".exit" {
-        std::process::exit(0);
+        std::process::exit(SUCCESS);
     } else {
         println!("Unrecognized command {}", input_str);
     }
@@ -19,7 +21,10 @@ fn main() {
     loop {
         print_prompt();
         input_buffer.clear();
-        io::stdin().lock().read_line(&mut input_buffer).expect("Could not read line");
+        io::stdin()
+            .lock()
+            .read_line(&mut input_buffer)
+            .expect("Could not read line");
 
         process_input(input_buffer.trim_end());
     }
