@@ -18,12 +18,10 @@ fn print_prompt() -> Result<(), Box<dyn Error>> {
 fn process_input(input_str: &str) {
     if input_str.starts_with('.') {
         process_metacommand(input_str);
+    } else if let Ok(parsed_statement) = parse_statement(input_str) {
+        execute_statement(parsed_statement);
     } else {
-        if let Ok(parsed_statement) = parse_statement(input_str) {
-            execute_statement(parsed_statement);
-        } else {
-            println!("Unrecognized keyword at start of {}", input_str);
-        }
+        println!("Unrecognized keyword at start of {}", input_str);
     }
 }
 

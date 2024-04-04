@@ -1,27 +1,24 @@
-#[derive(Debug)]
-pub enum StatementType {
-    Insert,
-    Select,
-}
+use nom::Finish;
 
-#[derive(Debug)]
-pub struct Statement {
-    pub statement_type: StatementType,
-}
+mod insert;
+mod select;
+pub mod statement;
 
-pub enum ParseError {
-    UnknownStatement,
-}
+use insert::*;
+use select::*;
+pub use statement::*;
 
 pub fn parse_statement(statement_str: &str) -> Result<Statement, ParseError> {
-    if statement_str.get(0..6) == Some("insert") {
+    if let Ok(("", row_to_insert)) = parse_insert(statement_str).finish() {
         let parsed_statement = Statement {
             statement_type: StatementType::Insert,
+            statement_contents: StatementContents::Insert(RowToInsert(row_to_insert)),
         };
         Ok(parsed_statement)
-    } else if statement_str.get(0..6) == Some("select") {
+    } else if let Ok(("", "")) = parse_select(statement_str).finish() {
         let parsed_statement = Statement {
             statement_type: StatementType::Select,
+            statement_contents: StatementContents::Select,
         };
         Ok(parsed_statement)
     } else {
