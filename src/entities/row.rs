@@ -20,8 +20,8 @@ impl Row {
         Self { attributes }
     }
 
-    pub fn serialize(self) -> Result<Vec<u8>, bincode::error::EncodeError> {
-        bincode::serde::encode_to_vec::<Vec<SQLType>, _>(self.attributes, Self::BINCODE_CONFIG)
+    pub fn serialize_into(self, slot: &mut [u8]) -> Result<usize, bincode::error::EncodeError> {
+        bincode::serde::encode_into_slice::<Vec<SQLType>, _>(self.attributes, slot, Self::BINCODE_CONFIG)
     }
 
     pub fn deserialize(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
