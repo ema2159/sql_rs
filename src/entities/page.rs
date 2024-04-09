@@ -18,17 +18,31 @@ pub enum PageError {
     PageFull,
     RowEncodingError(Box<dyn Error>),
     DeserializingError(Box<dyn Error>),
+    InvalidPage,
 }
 
 impl Display for PageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PageError::PageFull =>
-                write!(f, "Cannot insert row. Remaining page capacity is smaller than the row size"),
-            PageError::RowEncodingError(inner_error) =>
-                write!(f, "Could not serialize row. The following error was encountered: {}", inner_error),
-            PageError::DeserializingError(inner_error) =>
-                write!(f, "Could not deserialize page. The following error ocurred during deserialization: {}", inner_error),
+            PageError::PageFull => write!(
+                f,
+                "Cannot insert row. Remaining page capacity is smaller than the row size"
+            ),
+            PageError::RowEncodingError(inner_error) => write!(
+                f,
+                "Could not serialize row. The following error was encountered: {}",
+                inner_error
+            ),
+            PageError::DeserializingError(inner_error) => write!(
+                f,
+                "Could not deserialize page. The following error ocurred during deserialization: {}",
+                inner_error
+            ),
+            PageError::InvalidPage => write!(
+                f,
+                "The slice being deserialized does not correspond to a valid page. End of the slice
+                reached during deserialization"
+            ),
         }
     }
 }
@@ -84,12 +98,12 @@ impl Page {
     /* Page is serialized as follows:
     - First two bytes: number of rows in the page
     - All the serialized rows with the first two bytes of each row sequence
-      corresponding to the row sequence size and the following bytes corresponding
+      corresponding to the serialized row size and the following bytes corresponding
       to the contents of the row serialized */
     pub fn deserialize(&self) -> Result<Vec<Row>, PageError> {
         // Extract number of rows
         let mut num_rows_bytes: [u8; 2] = [0; 2];
-        num_rows_bytes.copy_from_slice(&self.data[0..2]);
+        num_rows_bytes.copy_from_slice(&self.data.get(0..2).ok_or_else(|| PageError::InvalidPage)?);
         let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
 
         let mut curr_idx = Self::START_SLOT;
@@ -98,7 +112,12 @@ impl Page {
         for _ in 0..num_rows {
             // Extract number of bytes per row
             let mut row_size_bytes: [u8; 2] = [0; 2];
-            row_size_bytes.copy_from_slice(&self.data[curr_idx..curr_idx + 2]);
+            row_size_bytes.copy_from_slice(
+                &self
+                    .data
+                    .get(curr_idx..curr_idx + 2)
+                    .ok_or_else(|| PageError::InvalidPage)?,
+            );
             let row_size: u16 = u16::from_be_bytes(row_size_bytes);
 
             // Deserialize row
