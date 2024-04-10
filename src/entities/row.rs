@@ -2,13 +2,13 @@
 use bincode;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SQLType {
     Int(i32),
     Varchar(String),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Row {
     attributes: Vec<SQLType>,
 }

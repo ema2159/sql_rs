@@ -3,13 +3,20 @@ use core::fmt::Display;
 use std::error::Error;
 use std::mem::{self, MaybeUninit};
 
-use super::row::*;
+use super::row::Row;
+
+use serde::{Deserialize, Serialize};
+use serde_big_array::BigArray;
 
 const PAGE_SIZE: usize = 4096;
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Page {
+    #[serde(skip_serializing)]
     num_rows: u16,
+    #[serde(with = "BigArray")]
     data: [u8; PAGE_SIZE],
+    #[serde(skip_serializing)]
     curr_slot: usize,
 }
 
@@ -90,9 +97,10 @@ impl Page {
         Ok(())
     }
 
-    pub fn complete(&mut self) {
+    pub fn complete(&mut self) -> u16 {
         let num_rows_slot = &mut self.data[..Self::NUM_ROWS_SLOT_SIZE];
         num_rows_slot.copy_from_slice(&(self.num_rows as u16).to_be_bytes());
+        self.num_rows
     }
 
     /* Page is serialized as follows:

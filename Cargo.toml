@@ -9,3 +9,4 @@ edition = "2021"
 nom = "7.*"
 bincode = { version = "2.0.0-rc", features = ["serde"] }
 serde = { version = "1.0.197", features = ["derive"] }
+serde-big-array = "0.5.1"
