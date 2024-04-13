@@ -1,30 +1,31 @@
 #![allow(dead_code)]
 use core::fmt::Display;
 use std::error::Error;
-use std::path::Path;
 use std::fs::File;
+use std::path::Path;
+
+use std::io::Write;
 
 use super::page::*;
 use super::row::Row;
 
-use serde::{Deserialize, Serialize};
-use serde_big_array::BigArray;
-
 const TABLE_MAX_PAGES: usize = 100;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Table {
-    #[serde(with = "BigArray")]
-    pages: [Option<Page>; TABLE_MAX_PAGES],
-    #[serde(skip_serializing)]
-    curr_page_idx: usize,
     num_rows: usize,
+    pages: [Option<Page>; TABLE_MAX_PAGES],
+    curr_page_idx: usize,
 }
 
 #[derive(Debug)]
 pub enum TableError {
     TableFull,
+    EndOfSliceWhileDeserializing,
     PageRowInsertError(Box<dyn Error>),
+    WriteToDiskError(Box<dyn Error>),
+    ReadFromDiskError(Box<dyn Error>),
+    PageDeserializingError(Box<dyn Error>),
 }
 
 impl Display for TableError {
@@ -37,6 +38,30 @@ impl Display for TableError {
                 inner_error
                 )
             }
+            TableError::WriteToDiskError(inner_error) => {
+                write!(
+                    f,
+                    "Could not write table to disk. The following error occurred during write: {}",
+                    inner_error
+                )
+            }
+            TableError::ReadFromDiskError(inner_error) => {
+                write!(
+                    f,
+                    "Could not read table from disk. The following error occurred during read: {}",
+                    inner_error
+                )
+            }
+            TableError::PageDeserializingError(inner_error) => write!(
+                f,
+                "Error when deserializing page. The following error ocurred during deserialization: {}",
+                inner_error
+            ),
+            TableError::EndOfSliceWhileDeserializing => write!(
+                f,
+                "The slice being deserialized does not correspond to a table page. End of the slice
+                reached during deserialization"
+            ),
         }
     }
 }
@@ -57,12 +82,13 @@ impl Table {
     }
 
     pub fn insert(&mut self, row: Row) -> Result<(), TableError> {
+        // First insertion attempt can fail due to current page being full
         let row_backup = row.clone();
 
         if let Some(Some(ref mut curr_page)) = self.pages.get_mut(self.curr_page_idx) {
             match curr_page.insert(row) {
                 Err(PageError::PageFull) => {
-                    curr_page.complete();
+                    curr_page.write_row_num();
                     self.curr_page_idx += 1;
                     if self.curr_page_idx >= TABLE_MAX_PAGES {
                         return Err(TableError::TableFull);
@@ -76,8 +102,8 @@ impl Table {
                 Err(other_err) => return Err(TableError::PageRowInsertError(Box::new(other_err))),
                 Ok(_) => (),
             }
-        } else {
         }
+
         self.num_rows += 1;
         Ok(())
     }
@@ -86,9 +112,81 @@ impl Table {
         *self = Self::new();
     }
 
-    pub fn save_to_disk(self, path: &Path) -> Result<(), Box<dyn Error>> {
-        let mut file = File::create_new(path)?;
-        bincode::serde::encode_into_std_write::<Self, _, File>(self, &mut file, Self::BINCODE_CONFIG)?;
+    pub fn serialize(&self) -> Vec<u8> {
+        const NUM_ROWS_SLOT_SIZE: usize = 2;
+        let num_pages = self.curr_page_idx + 1;
+        // Create vec of size num_pages + 2 bytes to store number of rows
+        let mut serialized_table = Vec::with_capacity(PAGE_SIZE * num_pages + NUM_ROWS_SLOT_SIZE);
+
+        // Insert 2 bytes with number of rows
+        serialized_table.extend_from_slice(&(self.num_rows as u16).to_be_bytes());
+
+        // Insert every non-None pages into serialized vector
+        for page in self.pages.iter().filter_map(|p| p.as_ref()) {
+            serialized_table.extend_from_slice(page.get_data());
+        }
+
+        serialized_table
+    }
+
+    pub fn deserialize(bytes: &[u8]) -> Result<Self, TableError> {
+        const NUM_ROWS_SLOT_SIZE: usize = 2;
+        // Extract number of rows
+        let mut num_rows_bytes: [u8; 2] = [0; NUM_ROWS_SLOT_SIZE];
+        num_rows_bytes.copy_from_slice(
+            bytes
+                .get(0..NUM_ROWS_SLOT_SIZE)
+                .ok_or_else(|| TableError::EndOfSliceWhileDeserializing)?,
+        );
+        let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
+
+        let mut table = Table::new();
+        table.num_rows = num_rows as usize;
+
+        // Extract pages
+        let mut page_insert_idx = 0;
+        for page_bytes in bytes[NUM_ROWS_SLOT_SIZE..].chunks(PAGE_SIZE) {
+            table.pages[page_insert_idx] = Some(Page::from_slice(page_bytes));
+            page_insert_idx += 1;
+        }
+        table.curr_page_idx = page_insert_idx - 1;
+
+        Ok(table)
+    }
+
+    pub fn deserialize_rows(&self) -> Result<Vec<Row>, TableError> {
+        let mut rows: Vec<Row> = Vec::new();
+        for page in self.pages.iter().filter_map(|p| p.as_ref()) {
+            rows.append(
+                &mut page
+                    .deserialize_rows()
+                    .map_err(|err| TableError::PageDeserializingError(Box::new(err)))?,
+            );
+        }
+        Ok(rows)
+    }
+
+    pub fn save_to_disk(mut self, path: &Path) -> Result<(), TableError> {
+        if let Some(Some(ref mut curr_page)) = self.pages.get_mut(self.curr_page_idx) {
+            curr_page.write_row_num();
+        }
+        let mut file =
+            File::create(path).map_err(|err| TableError::WriteToDiskError(Box::new(err)))?;
+
+        let serialized = self.serialize();
+
+        file.write_all(&serialized)
+            .map_err(|err| TableError::WriteToDiskError(Box::new(err)))?;
+
         Ok(())
+    }
+
+    pub fn read_from_disk(path: &Path) -> Result<Self, TableError> {
+        let data =
+            std::fs::read(path).map_err(|err| TableError::ReadFromDiskError(Box::new(err)))?;
+
+        let table = Table::deserialize(&data)?;
+
+        Ok(table)
     }
 }
