@@ -1,3 +1,4 @@
 pub mod row;
-pub mod page;
+mod page;
+pub mod columns;
 pub mod table;

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SQLType {
-    Int(i32),
-    Varchar(String),
+    Integer(i32),
+    Text(String),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -21,7 +21,11 @@ impl Row {
     }
 
     pub fn serialize_into(self, slot: &mut [u8]) -> Result<usize, bincode::error::EncodeError> {
-        bincode::serde::encode_into_slice::<Vec<SQLType>, _>(self.attributes, slot, Self::BINCODE_CONFIG)
+        bincode::serde::encode_into_slice::<Vec<SQLType>, _>(
+            self.attributes,
+            slot,
+            Self::BINCODE_CONFIG,
+        )
     }
 
     pub fn deserialize(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
