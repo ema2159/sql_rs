@@ -117,6 +117,8 @@ impl Table {
                 Err(other_err) => return Err(TableError::PageRowInsertError(Box::new(other_err))),
                 Ok(_) => (),
             }
+        } else {
+            return Err(TableError::TableFull);
         }
 
         self.num_rows += 1;
