@@ -1,21 +1,11 @@
 use super::insert::RowToInsert;
+use crate::ColumnItemType;
 
 #[derive(Debug)]
-pub enum StatementType {
-    Insert,
-    Select,
-}
-
-#[derive(Debug)]
-pub enum StatementContents<'a> {
+pub enum Statement<'a> {
+    Create((&'a str, Vec<(&'a str, ColumnItemType)>)),
     Insert(RowToInsert<'a>),
     Select,
-}
-
-#[derive(Debug)]
-pub struct Statement<'a> {
-    pub statement_type: StatementType,
-    pub statement_contents: StatementContents<'a>,
 }
 
 pub enum ParseError {
