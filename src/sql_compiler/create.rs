@@ -62,7 +62,7 @@ fn parse_create(input: &str) -> IResult<&str, CreateTokens, VerboseError<&str>> 
     ))(input)?;
 
     let (input, table_name) = parse_identifier(input)?;
-    let (input, _) = multispace1(input)?;
+    let (input, _) = multispace0(input)?;
     let (input, columns_vec) = delimited(tag("("), parse_columns, tag(")"))(input)?;
     let (_, _) = all_consuming(pair(multispace0, tag(";")))(input)?;
 
