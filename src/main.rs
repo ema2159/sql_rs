@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Write};
 mod metacommand_processor;
 mod sql_compiler;
 mod virtual_machine;
+mod entities;
 
 use metacommand_processor::process_metacommand;
 use sql_compiler::parse_statement;
@@ -18,10 +19,11 @@ fn print_prompt() -> Result<(), Box<dyn Error>> {
 fn process_input(input_str: &str) {
     if input_str.starts_with('.') {
         process_metacommand(input_str);
-    } else if let Ok(parsed_statement) = parse_statement(input_str) {
-        execute_statement(parsed_statement);
-    } else {
-        println!("Unrecognized keyword at start of {}", input_str);
+        return
+    }
+    match parse_statement(input_str) {
+        Ok(parsed_statement) => execute_statement(parsed_statement),
+        Err(parse_error) => println!("{}", parse_error)
     }
 }
 
@@ -33,6 +35,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         input_buffer.clear();
         io::stdin().lock().read_line(&mut input_buffer)?;
 
-        process_input(input_buffer.trim_end());
+        process_input(&input_buffer.trim());
     }
 }
