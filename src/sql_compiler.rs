@@ -1,12 +1,8 @@
 use std::error::Error;
 
 use nom::{
-    branch::alt,
-    bytes::complete::tag_no_case,
-    character::complete::multispace0,
-    combinator::map_res,
-    IResult,
-    error::VerboseError
+    branch::alt, bytes::complete::tag_no_case, character::complete::multispace0,
+    combinator::map_res, error::VerboseError, IResult,
 };
 
 mod common_parsers;
@@ -16,21 +12,13 @@ mod select;
 pub mod statement;
 
 use common_parsers::*;
-use create::*;
+use create::validate_create;
+pub use create::CreateTokens;
 pub use insert::*;
 use select::*;
 pub use statement::*;
 
 fn parse_statement_type(statement_str: &str) -> IResult<&str, StatementType, VerboseError<&str>> {
-    fn map_statement_type(s: &str) -> Result<StatementType, Box<dyn Error>> {
-        match s {
-            "create" => Ok(StatementType::Create),
-            "insert" => Ok(StatementType::Insert),
-            "select" => Ok(StatementType::Select),
-            _ => Err("Unknown statement type".into()),
-        }
-    }
-
     let (statement_str, _) = multispace0(statement_str)?;
 
     map_res(
@@ -39,7 +27,7 @@ fn parse_statement_type(statement_str: &str) -> IResult<&str, StatementType, Ver
             tag_no_case("insert"),
             tag_no_case("select"),
         )),
-        |s: &str| map_statement_type(s),
+        |s: &str| StatementType::try_from(s),
     )(statement_str)
 }
 

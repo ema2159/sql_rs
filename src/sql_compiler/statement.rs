@@ -17,6 +17,19 @@ pub enum StatementType {
     Select,
 }
 
+impl TryFrom<&str> for StatementType {
+    type Error = ParseError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "create" => Ok(StatementType::Create),
+            "insert" => Ok(StatementType::Insert),
+            "select" => Ok(StatementType::Select),
+            _ => Err(ParseError::UnknownStatement),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ParseError {
     MalformedStatement(String),

@@ -1,11 +1,10 @@
-use crate::sql_compiler::{RowToInsert, Statement};
-use crate::ColumnItemType;
+use crate::sql_compiler::{RowToInsert, Statement, CreateTokens};
 
 fn process_insert(row_to_insert: RowToInsert) {
     println!("This is the row to insert: {}", *row_to_insert)
 }
 
-fn process_create(table_tokens: (&str, Vec<(&str, ColumnItemType)>)) {
+fn process_create(table_tokens: CreateTokens) {
     println!("A table with the following properties will be created: {:?}", table_tokens)
 }
 

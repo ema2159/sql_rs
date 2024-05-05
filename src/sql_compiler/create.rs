@@ -13,7 +13,11 @@ use super::parse_identifier;
 use super::statement::{ParseError, Statement};
 use crate::entities::columns::{ColumnItemType, IntegerType, TextType};
 
-pub type CreateTokens<'a> = (&'a str, Vec<(&'a str, ColumnItemType)>);
+#[derive(Debug)]
+pub struct CreateTokens<'a> {
+    table_name: &'a str,
+    columns: Vec<(&'a str, ColumnItemType)>,
+}
 
 fn parse_int_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&str>> {
     let (remainder, _) = tag_no_case("int")(input)?;
@@ -62,7 +66,13 @@ fn parse_create(input: &str) -> IResult<&str, CreateTokens, VerboseError<&str>> 
     let (input, columns_vec) = delimited(tag("("), parse_columns, tag(")"))(input)?;
     let (_, _) = all_consuming(pair(multispace0, tag(";")))(input)?;
 
-    Ok(("", (table_name, columns_vec)))
+    Ok((
+        "",
+        CreateTokens {
+            table_name,
+            columns: columns_vec,
+        },
+    ))
 }
 
 pub(super) fn validate_create(input: &str) -> Result<Statement, ParseError> {
