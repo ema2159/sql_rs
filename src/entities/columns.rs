@@ -5,12 +5,16 @@ use std::ops::{Deref, DerefMut};
 use bincode;
 use serde::{Deserialize, Serialize};
 
+trait ColumnType {
+    fn validate(&self, input: &str) -> bool;
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum IntegerType {
     Int,
 }
 
-impl IntegerType {
+impl ColumnType for IntegerType {
     fn validate(&self, input: &str) -> bool {
         match self {
             IntegerType::Int => input.parse::<i32>().is_ok(),
@@ -23,7 +27,7 @@ pub enum TextType {
     Varchar(u8),
 }
 
-impl TextType {
+impl ColumnType for TextType {
     fn validate(&self, input: &str) -> bool {
         match self {
             TextType::Varchar(max_size) => input.len() <= *max_size as usize,
@@ -39,6 +43,16 @@ pub enum ColumnItemType {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Columns(pub BTreeMap<String, ColumnItemType>);
+
+impl From<Vec<(&str, ColumnItemType)>> for Columns {
+    fn from(columns_vec: Vec<(&str, ColumnItemType)>) -> Self {
+        let columns_map = columns_vec
+            .into_iter()
+            .map(|column| (column.0.to_owned(), column.1))
+            .collect();
+        Columns(columns_map)
+    }
+}
 
 impl Deref for Columns {
     type Target = BTreeMap<String, ColumnItemType>;
