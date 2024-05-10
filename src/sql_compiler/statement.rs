@@ -21,7 +21,8 @@ impl TryFrom<&str> for StatementType {
     type Error = ParseError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s {
+
+        match s.to_lowercase().as_str() {
             "create" => Ok(StatementType::Create),
             "insert" => Ok(StatementType::Insert),
             "select" => Ok(StatementType::Select),
