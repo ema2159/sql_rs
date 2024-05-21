@@ -15,8 +15,8 @@ use crate::entities::columns::{ColumnItemType, IntegerType, TextType};
 
 #[derive(Debug)]
 pub struct CreateTokens<'a> {
-    table_name: &'a str,
-    columns: Vec<(&'a str, ColumnItemType)>,
+    pub table_name: &'a str,
+    pub columns: Vec<(&'a str, ColumnItemType)>,
 }
 
 fn parse_int_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&str>> {

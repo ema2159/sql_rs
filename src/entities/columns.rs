@@ -70,8 +70,8 @@ impl DerefMut for Columns {
 
 impl Columns {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
-    pub fn new(attributes: BTreeMap<String, ColumnItemType>) -> Self {
-        Self(attributes)
+    pub fn new() -> Self {
+        Self(BTreeMap::<String, ColumnItemType>::new())
     }
 
     pub fn serialize(self) -> Result<Vec<u8>, bincode::error::EncodeError> {
