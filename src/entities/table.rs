@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 use core::fmt::Display;
-use std::error::Error;
 use std::fs::File;
 use std::path::Path;
 
@@ -14,6 +13,7 @@ const TABLE_MAX_PAGES: usize = 100;
 
 #[derive(Debug)]
 pub struct Table {
+    name: String,
     columns: Columns,
     num_rows: usize,
     pages: [Option<Page>; TABLE_MAX_PAGES],
@@ -24,12 +24,14 @@ pub struct Table {
 pub enum TableError {
     TableFull,
     EndOfSliceWhileDeserializing,
-    PageRowInsertError(Box<dyn Error>),
-    WriteToDiskError(Box<dyn Error>),
-    ReadFromDiskError(Box<dyn Error>),
-    PageDeserializingError(Box<dyn Error>),
-    ColumnsSerializingError(Box<dyn Error>),
-    ColumnsDeserializingError(Box<dyn Error>),
+    PageRowInsertError(String),
+    WriteToDiskError(String),
+    ReadFromDiskError(String),
+    PageDeserializingError(String),
+    ColumnsSerializingError(String),
+    ColumnsDeserializingError(String),
+    NameSerializingError(String),
+    NameDeserializingError(String),
 }
 
 impl Display for TableError {
@@ -76,6 +78,16 @@ impl Display for TableError {
                 "The slice being deserialized does not correspond to a table page. End of the slice
                 reached during deserialization"
             ),
+            TableError::NameSerializingError(inner_error) => write!(
+                f,
+                "Error when serializing name. The following error ocurred during serialization: {}",
+                inner_error
+            ),
+            TableError::NameDeserializingError(inner_error) => write!(
+                f,
+                "Error when deserializing name. The following error ocurred during deserialization: {}",
+                inner_error
+            ),
         }
     }
 }
@@ -83,12 +95,13 @@ impl Display for TableError {
 impl Table {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
-    pub fn new(columns: Columns) -> Self {
+    pub fn new(name: &str, columns: Columns) -> Self {
         const INIT_NONE: Option<Page> = None;
         let mut pages_array: [Option<Page>; TABLE_MAX_PAGES] = [INIT_NONE; TABLE_MAX_PAGES];
         pages_array[0] = Some(Page::new());
 
         Table {
+            name: name.to_string(),
             columns,
             pages: pages_array,
             curr_page_idx: 0,
@@ -111,10 +124,10 @@ impl Table {
                     let mut new_page = Page::new();
                     new_page
                         .insert(row_backup)
-                        .map_err(|err| TableError::PageRowInsertError(Box::new(err)))?;
+                        .map_err(|err| TableError::PageRowInsertError(err.to_string()))?;
                     self.pages[self.curr_page_idx] = Some(new_page);
                 }
-                Err(other_err) => return Err(TableError::PageRowInsertError(Box::new(other_err))),
+                Err(other_err) => return Err(TableError::PageRowInsertError(other_err.to_string())),
                 Ok(_) => (),
             }
         } else {
@@ -126,27 +139,43 @@ impl Table {
     }
 
     pub fn free(&mut self) {
-        *self = Self::new(self.columns.clone());
+        *self = Self::new(&self.name, self.columns.clone());
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>, TableError> {
-        const NUM_ROWS_SLOT_SIZE: usize = 2;
+        const ROW_NUM_SLOT_SIZE: usize = 2;
+        const NAME_SLOT_SIZE_SIZE: usize = 2;
+        const COLS_SLOT_SIZE_SIZE: usize = 2;
+
+        let serialized_name = bincode::encode_to_vec(self.name.to_string(), Self::BINCODE_CONFIG)
+            .map_err(|err| TableError::NameSerializingError(err.to_string()))?;
+
+        let name_slot_size = serialized_name.len();
 
         let serialized_cols = self
             .columns
             .clone()
             .serialize()
-            .map_err(|err| TableError::ColumnsSerializingError(Box::new(err)))?;
+            .map_err(|err| TableError::ColumnsSerializingError(err.to_string()))?;
         let cols_slot_size = serialized_cols.len();
 
         let num_pages = self.curr_page_idx + 1;
-        // Create vec of size num_pages + 2 bytes to store number of rows + size of serialized
-        // columns
-        let mut serialized_table =
-            Vec::with_capacity(NUM_ROWS_SLOT_SIZE + cols_slot_size + PAGE_SIZE * num_pages);
+
+        let mut serialized_table = Vec::with_capacity(
+            ROW_NUM_SLOT_SIZE
+                + NAME_SLOT_SIZE_SIZE
+                + name_slot_size
+                + COLS_SLOT_SIZE_SIZE
+                + cols_slot_size
+                + PAGE_SIZE * num_pages,
+        );
 
         // Insert 2 bytes with number of rows
         serialized_table.extend_from_slice(&(self.num_rows as u16).to_be_bytes());
+
+        // Insert serialized name size and content
+        serialized_table.extend_from_slice(&(name_slot_size as u16).to_be_bytes());
+        serialized_table.extend_from_slice(&serialized_name);
 
         // Insert serialized columns size and content
         serialized_table.extend_from_slice(&(cols_slot_size as u16).to_be_bytes());
@@ -156,37 +185,55 @@ impl Table {
         for page in self.pages.iter().filter_map(|p| p.as_ref()) {
             serialized_table.extend_from_slice(page.get_data());
         }
-
         Ok(serialized_table)
     }
 
     pub fn deserialize(bytes: &[u8]) -> Result<Self, TableError> {
         const NUM_ROWS_SLOT_SIZE: usize = 2;
+        const NAME_SLOT_SIZE_SIZE: usize = 2;
         const COLS_SLOT_SIZE_SIZE: usize = 2;
+
         // Extract number of rows
-        let mut num_rows_bytes: [u8; 2] = [0; NUM_ROWS_SLOT_SIZE];
+        let mut num_rows_bytes: [u8; NUM_ROWS_SLOT_SIZE] = [0; NUM_ROWS_SLOT_SIZE];
         num_rows_bytes.copy_from_slice(
             bytes
                 .get(0..NUM_ROWS_SLOT_SIZE)
-                .ok_or_else(|| TableError::EndOfSliceWhileDeserializing)?,
+                .ok_or(TableError::EndOfSliceWhileDeserializing)?,
         );
         let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
 
-        // Extract columns
+        // Extract name
         let offset = NUM_ROWS_SLOT_SIZE;
-        let mut col_size_bytes: [u8; 2] = [0; 2];
+        let mut name_size_bytes: [u8; NAME_SLOT_SIZE_SIZE] = [0; NAME_SLOT_SIZE_SIZE];
+        name_size_bytes.copy_from_slice(
+            bytes
+                .get(offset..offset + NAME_SLOT_SIZE_SIZE)
+                .ok_or(TableError::EndOfSliceWhileDeserializing)?,
+        );
+        let name_size: u16 = u16::from_be_bytes(name_size_bytes);
+
+        let offset = offset + NAME_SLOT_SIZE_SIZE;
+        let (name_deserialized, _): (String, usize) = bincode::decode_from_slice(
+            &bytes[offset..offset + name_size as usize],
+            Self::BINCODE_CONFIG,
+        )
+        .map_err(|err| TableError::NameDeserializingError(err.to_string()))?;
+
+        // Extract columns
+        let offset = offset + name_size as usize;
+        let mut col_size_bytes: [u8; COLS_SLOT_SIZE_SIZE] = [0; COLS_SLOT_SIZE_SIZE];
         col_size_bytes.copy_from_slice(
             bytes
                 .get(offset..offset + COLS_SLOT_SIZE_SIZE)
-                .ok_or_else(|| TableError::EndOfSliceWhileDeserializing)?,
+                .ok_or(TableError::EndOfSliceWhileDeserializing)?,
         );
         let col_size: u16 = u16::from_be_bytes(col_size_bytes);
 
         let offset = offset + COLS_SLOT_SIZE_SIZE;
         let columns_deserialized = Columns::deserialize(&bytes[offset..offset + col_size as usize])
-            .map_err(|err| TableError::ColumnsDeserializingError(Box::new(err)))?;
+            .map_err(|err| TableError::ColumnsDeserializingError(err.to_string()))?;
 
-        let mut table = Table::new(columns_deserialized);
+        let mut table = Table::new(&name_deserialized, columns_deserialized);
         table.num_rows = num_rows as usize;
 
         // Extract pages
@@ -207,30 +254,33 @@ impl Table {
             rows.append(
                 &mut page
                     .deserialize_rows()
-                    .map_err(|err| TableError::PageDeserializingError(Box::new(err)))?,
+                    .map_err(|err| TableError::PageDeserializingError(err.to_string()))?,
             );
         }
         Ok(rows)
     }
 
-    pub fn save_to_disk(mut self, path: &Path) -> Result<(), TableError> {
+    pub fn save_to_disk(mut self, path_str: &str) -> Result<(), TableError> {
+        let path = Path::new(path_str);
+
         if let Some(Some(ref mut curr_page)) = self.pages.get_mut(self.curr_page_idx) {
             curr_page.write_row_num();
         }
         let mut file =
-            File::create(path).map_err(|err| TableError::WriteToDiskError(Box::new(err)))?;
+            File::create(path).map_err(|err| TableError::WriteToDiskError(err.to_string()))?;
 
         let serialized = self.serialize()?;
 
         file.write_all(&serialized)
-            .map_err(|err| TableError::WriteToDiskError(Box::new(err)))?;
+            .map_err(|err| TableError::WriteToDiskError(err.to_string()))?;
 
         Ok(())
     }
 
-    pub fn read_from_disk(path: &Path) -> Result<Self, TableError> {
+    pub fn read_from_disk(path_str: &str) -> Result<Self, TableError> {
+        let path = Path::new(path_str);
         let data =
-            std::fs::read(path).map_err(|err| TableError::ReadFromDiskError(Box::new(err)))?;
+            std::fs::read(path).map_err(|err| TableError::ReadFromDiskError(err.to_string()))?;
 
         let table = Table::deserialize(&data)?;
 
