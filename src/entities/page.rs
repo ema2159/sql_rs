@@ -1,9 +1,7 @@
 #![allow(dead_code)]
-use core::fmt::Display;
-use std::error::Error;
 use std::mem::{self, MaybeUninit};
 
-use bincode;
+use thiserror::Error;
 
 use super::row::Row;
 
@@ -16,41 +14,20 @@ pub struct Page {
     curr_slot: usize,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum PageError {
+    #[error("Cannot insert row. Remaining page capacity is smaller than the row size")]
     PageFull,
-    RowEncodingError(Box<dyn Error>),
-    DeserializingError(Box<dyn Error>),
+    #[error("Could not serialize row. The following error was encountered: {0}")]
+    RowEncodingError(String),
+    #[error("Could not deserialize page. The following error ocurred during deserialization: {0}")]
+    DeserializingError(String),
+    #[error(
+        "The slice being deserialized does not correspond to a valid page. End of the slice
+                reached during deserialization"
+    )]
     EndOfSliceWhileDeserializing,
 }
-
-impl Display for PageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PageError::PageFull => write!(
-                f,
-                "Cannot insert row. Remaining page capacity is smaller than the row size"
-            ),
-            PageError::RowEncodingError(inner_error) => write!(
-                f,
-                "Could not serialize row. The following error was encountered: {}",
-                inner_error
-            ),
-            PageError::DeserializingError(inner_error) => write!(
-                f,
-                "Could not deserialize page. The following error ocurred during deserialization: {}",
-                inner_error
-            ),
-            PageError::EndOfSliceWhileDeserializing => write!(
-                f,
-                "The slice being deserialized does not correspond to a valid page. End of the slice
-                reached during deserialization"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for PageError {}
 
 impl Page {
     const NUM_ROWS_SLOT_SIZE: usize = 2;
@@ -107,7 +84,7 @@ impl Page {
         let data_slot = &mut self.data[self.curr_slot + SIZE_SLOT_SIZE..];
         let inserted_bytes = row.serialize_into(data_slot).map_err(|err| match err {
             bincode::error::EncodeError::UnexpectedEnd => PageError::PageFull,
-            _ => PageError::RowEncodingError(Box::new(err)),
+            _ => PageError::RowEncodingError(err.to_string()),
         })?;
 
         // Insert size of serialized row in size slot at the beginning of the slot
@@ -136,7 +113,7 @@ impl Page {
         num_rows_bytes.copy_from_slice(
             self.data
                 .get(0..2)
-                .ok_or_else(|| PageError::EndOfSliceWhileDeserializing)?,
+                .ok_or(PageError::EndOfSliceWhileDeserializing)?,
         );
         let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
 
@@ -149,14 +126,14 @@ impl Page {
             row_size_bytes.copy_from_slice(
                 self.data
                     .get(curr_idx..curr_idx + 2)
-                    .ok_or_else(|| PageError::EndOfSliceWhileDeserializing)?,
+                    .ok_or(PageError::EndOfSliceWhileDeserializing)?,
             );
             let row_size: u16 = u16::from_be_bytes(row_size_bytes);
 
             // Deserialize row
             let (curr_row_start, curr_row_end) = (curr_idx + 2, curr_idx + 2 + row_size as usize);
             let curr_row = Row::deserialize(&self.data[curr_row_start..curr_row_end])
-                .map_err(|err| PageError::DeserializingError(Box::new(err)))?;
+                .map_err(|err| PageError::DeserializingError(err.to_string()))?;
             rows_vec.push(curr_row);
             curr_idx = curr_row_end + 1;
         }

@@ -1,7 +1,8 @@
 #![allow(dead_code)]
-use core::fmt::Display;
 use std::fs::File;
 use std::path::Path;
+
+use thiserror::Error;
 
 use std::io::Write;
 
@@ -20,76 +21,25 @@ pub struct Table {
     curr_page_idx: usize,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum TableError {
+    #[error("Cannot insert row. Pages limit was reached.")]
     TableFull,
-    EndOfSliceWhileDeserializing,
+    #[error("Could not insert row in page. The following error ocurred during insertion: {0}")]
     PageRowInsertError(String),
+    #[error("Could not write table to disk. The following error occurred during write: {0}")]
     WriteToDiskError(String),
+    #[error("Could not read table from disk. The following error occurred during read: {0}")]
     ReadFromDiskError(String),
-    PageDeserializingError(String),
-    ColumnsSerializingError(String),
-    ColumnsDeserializingError(String),
-    NameSerializingError(String),
-    NameDeserializingError(String),
-}
-
-impl Display for TableError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TableError::TableFull => write!(f, "Cannot insert row. Pages limit was reached."),
-            TableError::PageRowInsertError(inner_error) => {
-                write!(f,
-                "Could not insert row in page. The following error ocurred during insertion: {}",
-                inner_error
-                )
-            }
-            TableError::WriteToDiskError(inner_error) => {
-                write!(
-                    f,
-                    "Could not write table to disk. The following error occurred during write: {}",
-                    inner_error
-                )
-            }
-            TableError::ReadFromDiskError(inner_error) => {
-                write!(
-                    f,
-                    "Could not read table from disk. The following error occurred during read: {}",
-                    inner_error
-                )
-            }
-            TableError::PageDeserializingError(inner_error) => write!(
-                f,
-                "Error when deserializing page. The following error ocurred during deserialization: {}",
-                inner_error
-            ),
-            TableError::ColumnsSerializingError(inner_error) => write!(
-                f,
-                "Error when serializing columns. The following error ocurred during serialization: {}",
-                inner_error
-            ),
-            TableError::ColumnsDeserializingError(inner_error) => write!(
-                f,
-                "Error when deserializing columns. The following error ocurred during deserialization: {}",
-                inner_error
-            ),
-            TableError::EndOfSliceWhileDeserializing => write!(
-                f,
-                "The slice being deserialized does not correspond to a table page. End of the slice
+    #[error(
+        "The slice being deserialized does not correspond to a table page. End of the slice
                 reached during deserialization"
-            ),
-            TableError::NameSerializingError(inner_error) => write!(
-                f,
-                "Error when serializing name. The following error ocurred during serialization: {}",
-                inner_error
-            ),
-            TableError::NameDeserializingError(inner_error) => write!(
-                f,
-                "Error when deserializing name. The following error ocurred during deserialization: {}",
-                inner_error
-            ),
-        }
-    }
+    )]
+    EndOfSliceWhileDeserializing,
+    #[error("The following error ocurred during deserialization: {0}")]
+    SerializationError(String),
+    #[error("The following error ocurred during deserialization: {0}")]
+    DeserializationError(String),
 }
 
 impl Table {
@@ -127,7 +77,9 @@ impl Table {
                         .map_err(|err| TableError::PageRowInsertError(err.to_string()))?;
                     self.pages[self.curr_page_idx] = Some(new_page);
                 }
-                Err(other_err) => return Err(TableError::PageRowInsertError(other_err.to_string())),
+                Err(other_err) => {
+                    return Err(TableError::PageRowInsertError(other_err.to_string()))
+                }
                 Ok(_) => (),
             }
         } else {
@@ -148,7 +100,7 @@ impl Table {
         const COLS_SLOT_SIZE_SIZE: usize = 2;
 
         let serialized_name = bincode::encode_to_vec(self.name.to_string(), Self::BINCODE_CONFIG)
-            .map_err(|err| TableError::NameSerializingError(err.to_string()))?;
+            .map_err(|err| TableError::SerializationError(err.to_string()))?;
 
         let name_slot_size = serialized_name.len();
 
@@ -156,7 +108,7 @@ impl Table {
             .columns
             .clone()
             .serialize()
-            .map_err(|err| TableError::ColumnsSerializingError(err.to_string()))?;
+            .map_err(|err| TableError::SerializationError(err.to_string()))?;
         let cols_slot_size = serialized_cols.len();
 
         let num_pages = self.curr_page_idx + 1;
@@ -217,7 +169,7 @@ impl Table {
             &bytes[offset..offset + name_size as usize],
             Self::BINCODE_CONFIG,
         )
-        .map_err(|err| TableError::NameDeserializingError(err.to_string()))?;
+        .map_err(|err| TableError::DeserializationError(err.to_string()))?;
 
         // Extract columns
         let offset = offset + name_size as usize;
@@ -231,7 +183,7 @@ impl Table {
 
         let offset = offset + COLS_SLOT_SIZE_SIZE;
         let columns_deserialized = Columns::deserialize(&bytes[offset..offset + col_size as usize])
-            .map_err(|err| TableError::ColumnsDeserializingError(err.to_string()))?;
+            .map_err(|err| TableError::DeserializationError(err.to_string()))?;
 
         let mut table = Table::new(&name_deserialized, columns_deserialized);
         table.num_rows = num_rows as usize;
@@ -254,7 +206,7 @@ impl Table {
             rows.append(
                 &mut page
                     .deserialize_rows()
-                    .map_err(|err| TableError::PageDeserializingError(err.to_string()))?,
+                    .map_err(|err| TableError::DeserializationError(err.to_string()))?,
             );
         }
         Ok(rows)

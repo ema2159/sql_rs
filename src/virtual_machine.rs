@@ -1,10 +1,19 @@
-use core::fmt::Display;
-use std::collections::BTreeMap;
+use thiserror::Error;
 
 use crate::sql_compiler::{CreateTokens, RowToInsert, Statement};
 
 use crate::entities::columns::Columns;
 use crate::entities::table::Table;
+
+#[derive(Error, Debug)]
+pub enum ExecuteError {
+    #[error("Cannot create table {0}. Another table with the same name already exists")]
+    DuplicatedTableName(String),
+    #[error("Cannot create table. Two columns have the same name: {0}")]
+    DuplicatedColumnName(String),
+    #[error("Error while writing table to disk")]
+    TableWriteError,
+}
 
 fn process_insert(row_to_insert: RowToInsert) -> Result<(), ExecuteError> {
     println!("This is the row to insert: {}", *row_to_insert);
@@ -53,30 +62,3 @@ pub fn execute_statement(statement: Statement) -> Result<(), ExecuteError> {
         }
     }
 }
-
-#[derive(Debug)]
-pub enum ExecuteError {
-    DuplicatedTableName(String),
-    DuplicatedColumnName(String),
-    TableWriteError,
-}
-
-impl Display for ExecuteError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExecuteError::DuplicatedTableName(table_name) => write!(
-                f,
-                "Cannot create table {}. Another table with the same name already exists",
-                table_name
-            ),
-            ExecuteError::DuplicatedColumnName(column_name) => write!(
-                f,
-                "Cannot create table. Two columns have the same name: {}",
-                column_name
-            ),
-            ExecuteError::TableWriteError => write!(f, "Error while writing table to disk"),
-        }
-    }
-}
-
-impl std::error::Error for ExecuteError {}

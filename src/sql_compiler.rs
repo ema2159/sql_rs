@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use nom::{
     branch::alt, bytes::complete::tag_no_case, character::complete::multispace0,
     combinator::map_res, error::VerboseError, IResult,
