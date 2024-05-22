@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::sql_compiler::{CreateTokens, RowToInsert, Statement};
+use crate::sql_compiler::{CreateTokens, InsertTokens, Statement};
 
 use crate::entities::columns::Columns;
 use crate::entities::table::Table;
@@ -15,8 +15,8 @@ pub enum ExecuteError {
     TableWriteError,
 }
 
-fn process_insert(row_to_insert: RowToInsert) -> Result<(), ExecuteError> {
-    println!("This is the row to insert: {}", *row_to_insert);
+fn process_insert(insert_tokens: InsertTokens) -> Result<(), ExecuteError> {
+    println!("Insert tokens: {:?}", insert_tokens);
     Ok(())
 }
 
@@ -54,8 +54,8 @@ fn process_create(create_tokens: CreateTokens) -> Result<(), ExecuteError> {
 
 pub fn execute_statement(statement: Statement) -> Result<(), ExecuteError> {
     match statement {
-        Statement::Create(columns) => process_create(columns),
-        Statement::Insert(row_to_insert) => process_insert(row_to_insert),
+        Statement::Create(createinsert_tokenstokens) => process_create(createinsert_tokenstokens),
+        Statement::Insert(insert_tokens) => process_insert(insert_tokens),
         Statement::Select => {
             println!("This is where we would do an select");
             Ok(())

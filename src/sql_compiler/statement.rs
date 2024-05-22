@@ -1,12 +1,12 @@
 use core::fmt::Display;
 
 use super::create::CreateTokens;
-use super::insert::RowToInsert;
+use super::insert::InsertTokens;
 
 #[derive(Debug)]
 pub enum Statement<'a> {
     Create(CreateTokens<'a>),
-    Insert(RowToInsert<'a>),
+    Insert(InsertTokens<'a>),
     Select,
 }
 
