@@ -1,7 +1,7 @@
 use nom::{
     branch::alt,
-    bytes::complete::{tag, tag_no_case},
-    character::complete::{digit1, multispace0, multispace1},
+    bytes::complete::tag_no_case,
+    character::complete::{char, digit1, multispace0, multispace1},
     combinator::{all_consuming, cut, map_res},
     error::{convert_error, VerboseError},
     multi::separated_list1,
@@ -28,7 +28,7 @@ fn parse_text_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&s
     let (remainder, num_characters) = delimited(
         tag_no_case("varchar("),
         map_res(digit1, |s: &str| s.parse::<u8>()),
-        tag(")"),
+        char(')'),
     )(input)?;
 
     Ok((
@@ -43,7 +43,7 @@ fn parse_column_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<
 
 fn parse_columns(input: &str) -> IResult<&str, Vec<(&str, ColumnItemType)>, VerboseError<&str>> {
     separated_list1(
-        tag(","),
+        char(','),
         cut(delimited(
             multispace0,
             separated_pair(parse_identifier, multispace1, parse_column_type),
@@ -63,8 +63,8 @@ fn parse_create(input: &str) -> IResult<&str, CreateTokens, VerboseError<&str>> 
 
     let (input, table_name) = parse_identifier(input)?;
     let (input, _) = multispace0(input)?;
-    let (input, columns_vec) = delimited(tag("("), parse_columns, tag(")"))(input)?;
-    let (_, _) = all_consuming(pair(multispace0, tag(";")))(input)?;
+    let (input, columns_vec) = delimited(char('('), parse_columns, char(')'))(input)?;
+    let (_, _) = all_consuming(pair(multispace0, char(';')))(input)?;
 
     Ok((
         "",
