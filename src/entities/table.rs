@@ -14,8 +14,8 @@ const TABLE_MAX_PAGES: usize = 100;
 
 #[derive(Debug)]
 pub struct Table {
-    name: String,
-    columns: Columns,
+    pub name: String,
+    pub columns: Columns,
     num_rows: usize,
     pages: [Option<Page>; TABLE_MAX_PAGES],
     curr_page_idx: usize,

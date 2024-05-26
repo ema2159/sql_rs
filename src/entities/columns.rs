@@ -1,12 +1,13 @@
 #![allow(dead_code)]
+use super::row::SQLType;
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
 use bincode;
 use serde::{Deserialize, Serialize};
 
-trait ColumnType {
-    fn validate(&self, input: &str) -> bool;
+pub trait ColumnType {
+    fn validate(&self, input: &str) -> Option<SQLType>;
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -15,9 +16,9 @@ pub enum IntegerType {
 }
 
 impl ColumnType for IntegerType {
-    fn validate(&self, input: &str) -> bool {
+    fn validate(&self, input: &str) -> Option<SQLType> {
         match self {
-            IntegerType::Int => input.parse::<i32>().is_ok(),
+            IntegerType::Int => Some(SQLType::Integer(input.parse::<i32>().ok()?)),
         }
     }
 }
@@ -28,9 +29,15 @@ pub enum TextType {
 }
 
 impl ColumnType for TextType {
-    fn validate(&self, input: &str) -> bool {
+    fn validate(&self, input: &str) -> Option<SQLType> {
         match self {
-            TextType::Varchar(max_size) => input.len() <= *max_size as usize,
+            TextType::Varchar(max_size) => {
+                if input.len() <= *max_size as usize {
+                    Some(SQLType::Text(input.to_owned()))
+                } else {
+                    None
+                }
+            }
         }
     }
 }
@@ -87,13 +94,5 @@ impl Columns {
             _,
         >(bytes, Self::BINCODE_CONFIG)?;
         Ok(Self(attributes))
-    }
-
-    fn validate(input: &str, column_type: &ColumnItemType) -> bool {
-        match column_type {
-            ColumnItemType::Integer(int_type) => int_type.validate(input),
-
-            ColumnItemType::Text(text_type) => text_type.validate(input),
-        }
     }
 }
