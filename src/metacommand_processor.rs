@@ -1,6 +1,5 @@
 use std::env;
 use std::fs;
-use std::path::Path;
 use std::str::FromStr;
 
 const SUCCESS: i32 = 0;

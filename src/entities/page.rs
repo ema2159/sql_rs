@@ -31,7 +31,9 @@ pub enum PageError {
 
 impl Page {
     const NUM_ROWS_SLOT_SIZE: usize = 2;
-    const START_SLOT: usize = Self::NUM_ROWS_SLOT_SIZE;
+    const CURR_SLOT_SLOT_SIZE: usize = 2;
+    const START_SLOT: usize = Self::NUM_ROWS_SLOT_SIZE + Self::CURR_SLOT_SLOT_SIZE;
+    const ROW_SIZE_SLOT_SIZE: usize = 2;
 
     pub fn new() -> Self {
         /* For performance reasons, a page is initialized as an empty array.
@@ -67,14 +69,33 @@ impl Page {
 
         let data = uninitialized_array;
 
+        // Extract number of rows
+        let mut num_rows_bytes: [u8; Self::NUM_ROWS_SLOT_SIZE] = [0; Self::NUM_ROWS_SLOT_SIZE];
+        num_rows_bytes.copy_from_slice(
+            bytes
+                .get(0..Self::NUM_ROWS_SLOT_SIZE).unwrap()
+                // .ok_or(PageError::EndOfSliceWhileDeserializing)?,
+        );
+        let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
+
+        // Extract curr_slot
+        let mut curr_slot_bytes: [u8; Self::CURR_SLOT_SLOT_SIZE] = [0; Self::CURR_SLOT_SLOT_SIZE];
+        curr_slot_bytes.copy_from_slice(
+            bytes
+                .get(Self::NUM_ROWS_SLOT_SIZE..Self::NUM_ROWS_SLOT_SIZE+Self::CURR_SLOT_SLOT_SIZE).unwrap()
+                // .ok_or(PageError::EndOfSliceWhileDeserializing)?,
+        );
+        let curr_slot: usize = u16::from_be_bytes(curr_slot_bytes) as usize;
+
         Page {
-            curr_slot: 0,
-            num_rows: 0,
+            curr_slot,
+            num_rows,
             data,
         }
     }
 
-    pub fn get_data(&self) -> &[u8; PAGE_SIZE] {
+    pub fn serialize(&mut self) -> &[u8; PAGE_SIZE] {
+        self.write_header();
         &self.data
     }
 
@@ -96,9 +117,12 @@ impl Page {
         Ok(())
     }
 
-    pub fn write_row_num(&mut self) -> u16 {
+    pub fn write_header(&mut self) -> u16 {
         let num_rows_slot = &mut self.data[..Self::NUM_ROWS_SLOT_SIZE];
         num_rows_slot.copy_from_slice(&self.num_rows.to_be_bytes());
+        let curr_slot_slot = &mut self.data
+            [Self::NUM_ROWS_SLOT_SIZE..Self::NUM_ROWS_SLOT_SIZE + Self::ROW_SIZE_SLOT_SIZE];
+        curr_slot_slot.copy_from_slice(&(self.curr_slot as u16).to_be_bytes());
         self.num_rows
     }
 
@@ -109,10 +133,10 @@ impl Page {
       to the contents of the row serialized */
     pub fn deserialize_rows(&self) -> Result<Vec<Row>, PageError> {
         // Extract number of rows
-        let mut num_rows_bytes: [u8; 2] = [0; 2];
+        let mut num_rows_bytes: [u8; Self::NUM_ROWS_SLOT_SIZE] = [0; Self::NUM_ROWS_SLOT_SIZE];
         num_rows_bytes.copy_from_slice(
             self.data
-                .get(0..2)
+                .get(0..Self::NUM_ROWS_SLOT_SIZE)
                 .ok_or(PageError::EndOfSliceWhileDeserializing)?,
         );
         let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
@@ -122,16 +146,19 @@ impl Page {
 
         for _ in 0..num_rows {
             // Extract number of bytes per row
-            let mut row_size_bytes: [u8; 2] = [0; 2];
+            let mut row_size_bytes: [u8; Self::ROW_SIZE_SLOT_SIZE] = [0; Self::ROW_SIZE_SLOT_SIZE];
             row_size_bytes.copy_from_slice(
                 self.data
-                    .get(curr_idx..curr_idx + 2)
+                    .get(curr_idx..curr_idx + Self::ROW_SIZE_SLOT_SIZE)
                     .ok_or(PageError::EndOfSliceWhileDeserializing)?,
             );
             let row_size: u16 = u16::from_be_bytes(row_size_bytes);
 
             // Deserialize row
-            let (curr_row_start, curr_row_end) = (curr_idx + 2, curr_idx + 2 + row_size as usize);
+            let (curr_row_start, curr_row_end) = (
+                curr_idx + Self::ROW_SIZE_SLOT_SIZE,
+                curr_idx + Self::ROW_SIZE_SLOT_SIZE + row_size as usize,
+            );
             let curr_row = Row::deserialize(&self.data[curr_row_start..curr_row_end])
                 .map_err(|err| PageError::DeserializingError(err.to_string()))?;
             rows_vec.push(curr_row);

@@ -66,7 +66,7 @@ impl Table {
         if let Some(Some(ref mut curr_page)) = self.pages.get_mut(self.curr_page_idx) {
             match curr_page.insert(row) {
                 Err(PageError::PageFull) => {
-                    curr_page.write_row_num();
+                    curr_page.write_header();
                     self.curr_page_idx += 1;
                     if self.curr_page_idx >= TABLE_MAX_PAGES {
                         return Err(TableError::TableFull);
@@ -94,7 +94,7 @@ impl Table {
         *self = Self::new(&self.name, self.columns.clone());
     }
 
-    pub fn serialize(&self) -> Result<Vec<u8>, TableError> {
+    pub fn serialize(&mut self) -> Result<Vec<u8>, TableError> {
         const ROW_NUM_SLOT_SIZE: usize = 2;
         const NAME_SLOT_SIZE_SIZE: usize = 2;
         const COLS_SLOT_SIZE_SIZE: usize = 2;
@@ -134,8 +134,8 @@ impl Table {
         serialized_table.extend_from_slice(&serialized_cols);
 
         // Insert every non-None pages into serialized vector
-        for page in self.pages.iter().filter_map(|p| p.as_ref()) {
-            serialized_table.extend_from_slice(page.get_data());
+        for page in self.pages.iter_mut().filter_map(|p| p.as_mut()) {
+            serialized_table.extend_from_slice(page.serialize());
         }
         Ok(serialized_table)
     }
@@ -215,9 +215,6 @@ impl Table {
     pub fn save_to_disk(mut self, path_str: &str) -> Result<(), TableError> {
         let path = Path::new(path_str);
 
-        if let Some(Some(ref mut curr_page)) = self.pages.get_mut(self.curr_page_idx) {
-            curr_page.write_row_num();
-        }
         let mut file =
             File::create(path).map_err(|err| TableError::WriteToDiskError(err.to_string()))?;
 
