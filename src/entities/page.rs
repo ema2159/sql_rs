@@ -72,18 +72,14 @@ impl Page {
         // Extract number of rows
         let mut num_rows_bytes: [u8; Self::NUM_ROWS_SLOT_SIZE] = [0; Self::NUM_ROWS_SLOT_SIZE];
         num_rows_bytes.copy_from_slice(
-            bytes
-                .get(0..Self::NUM_ROWS_SLOT_SIZE).unwrap()
-                // .ok_or(PageError::EndOfSliceWhileDeserializing)?,
+            &bytes[0..Self::NUM_ROWS_SLOT_SIZE], // .ok_or(PageError::EndOfSliceWhileDeserializing)?,
         );
         let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
 
         // Extract curr_slot
         let mut curr_slot_bytes: [u8; Self::CURR_SLOT_SLOT_SIZE] = [0; Self::CURR_SLOT_SLOT_SIZE];
         curr_slot_bytes.copy_from_slice(
-            bytes
-                .get(Self::NUM_ROWS_SLOT_SIZE..Self::NUM_ROWS_SLOT_SIZE+Self::CURR_SLOT_SLOT_SIZE).unwrap()
-                // .ok_or(PageError::EndOfSliceWhileDeserializing)?,
+            &bytes[Self::NUM_ROWS_SLOT_SIZE..Self::NUM_ROWS_SLOT_SIZE + Self::CURR_SLOT_SLOT_SIZE],
         );
         let curr_slot: usize = u16::from_be_bytes(curr_slot_bytes) as usize;
 
