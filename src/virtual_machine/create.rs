@@ -1,6 +1,6 @@
 use super::vm_error::VMError;
-use crate::entities::columns::Columns;
-use crate::entities::table::Table;
+use crate::backend::columns::Columns;
+use crate::backend::table::Table;
 use crate::sql_compiler::CreateTokens;
 
 pub(super) fn process_create(create_tokens: CreateTokens) -> Result<(), VMError> {

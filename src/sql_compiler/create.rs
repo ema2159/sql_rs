@@ -11,7 +11,7 @@ use nom::{
 
 use super::parse_identifier;
 use super::statement::{ParseError, Statement};
-use crate::entities::columns::{ColumnItemType, IntegerType, TextType};
+use crate::backend::columns::{ColumnItemType, IntegerType, TextType};
 
 #[derive(Debug)]
 pub struct CreateTokens<'a> {

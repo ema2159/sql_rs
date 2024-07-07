@@ -1,7 +1,7 @@
 use super::vm_error::VMError;
-use crate::entities::columns::{ColumnItemType, ColumnType, Columns};
-use crate::entities::row::{Row, SQLType};
-use crate::entities::table::Table;
+use crate::backend::columns::{ColumnItemType, ColumnType, Columns};
+use crate::backend::row::{Row, SQLType};
+use crate::backend::table::Table;
 use crate::sql_compiler::InsertTokens;
 
 fn parse_value(input: &str, column_type: &ColumnItemType) -> Option<SQLType> {

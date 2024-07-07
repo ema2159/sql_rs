@@ -2,7 +2,7 @@ use std::error::Error;
 
 use dialoguer::{theme::ColorfulTheme, BasicHistory, Input};
 
-mod entities;
+mod backend;
 mod metacommand_processor;
 mod sql_compiler;
 mod virtual_machine;
