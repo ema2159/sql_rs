@@ -24,12 +24,7 @@ pub(super) fn process_create(create_tokens: CreateTokens) -> Result<(), VMError>
         }
     }
 
-    let new_table = Table::new(table_name, columns);
-
-    let db_name = table_name.to_owned() + ".db";
-    new_table
-        .save_to_disk(&db_name)
-        .map_err(|table_error| VMError::TableWriteError(table_error.to_string()))?;
+    Table::create(table_name, columns);
 
     Ok(())
 }

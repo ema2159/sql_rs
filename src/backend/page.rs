@@ -7,7 +7,7 @@ use super::row::Row;
 
 pub const PAGE_SIZE: usize = 4096;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Page {
     num_rows: u16,
     data: [u8; PAGE_SIZE],
@@ -110,6 +110,7 @@ impl Page {
 
         self.curr_slot = self.curr_slot + SIZE_SLOT_SIZE + inserted_bytes + 1;
         self.num_rows += 1;
+        self.write_header();
         Ok(())
     }
 

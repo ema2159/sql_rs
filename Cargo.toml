@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 bincode = { version = "2.0.0-rc", features = ["serde"] }
 dialoguer = { version = "0.11.0", features = ["history"] }
+lazy_static = "1.5.0"
 nom = "7.*"
 serde = { version = "1.0.197", features = ["derive"] }
 thiserror = "1.0.61"

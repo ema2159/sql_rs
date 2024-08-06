@@ -65,9 +65,9 @@ pub(super) fn process_insert(insert_tokens: InsertTokens) -> Result<(), VMError>
 
     order_and_check_dup(&mut items_to_add)?;
 
-    let db_name = table_name.to_owned() + ".db";
+    let db_name = table_name.to_owned();
 
-    let mut table = Table::read_from_disk(&db_name)
+    let mut table = Table::db_open(&db_name)
         .map_err(|table_error| VMError::TableReadError(table_error.to_string()))?;
 
     let columns = &table.columns;
@@ -79,10 +79,11 @@ pub(super) fn process_insert(insert_tokens: InsertTokens) -> Result<(), VMError>
         .map_err(|table_err| VMError::ItemInsertingError(table_err.to_string()))?;
 
     println!("{:?}", table);
+    println!("{:?}", table.deserialize_rows());
 
-    table
-        .save_to_disk(&db_name)
-        .map_err(|table_error| VMError::TableWriteError(table_error.to_string()))?;
+    // table
+        // .db_close()
+        // .map_err(|table_error| VMError::TableWriteError(table_error.to_string()))?;
 
     Ok(())
 }
