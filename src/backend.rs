@@ -3,3 +3,4 @@ mod page;
 mod pager;
 pub mod columns;
 pub mod table;
+pub mod database;

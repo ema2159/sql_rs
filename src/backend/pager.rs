@@ -1,6 +1,7 @@
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
-use std::path::Path;
+use std::rc::Rc;
 
 use thiserror::Error;
 
@@ -30,30 +31,18 @@ pub enum PagerError {
 #[derive(Debug)]
 pub struct Pager {
     pub pages_cache: [Option<Page>; TABLE_MAX_PAGES],
-    file: Option<File>,
+    file_ref: Rc<RefCell<File>>,
 }
 
 impl Pager {
-    pub fn close(&mut self) {
-        const INIT_NONE: Option<Page> = None;
-        self.pages_cache = [INIT_NONE; TABLE_MAX_PAGES];
-        self.file = None;
-    }
-
-    pub fn open(path_str: &str) -> Result<Self, PagerError> {
-        let path = Path::new(path_str);
-        let file = Some(
-            File::options()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|err| PagerError::ReadFromDiskError(err.to_string()))?,
-        );
-
+    pub fn new(file: Rc<RefCell<File>>) -> Pager {
         const INIT_NONE: Option<Page> = None;
         let pages_cache: [Option<Page>; TABLE_MAX_PAGES] = [INIT_NONE; TABLE_MAX_PAGES];
 
-        Ok(Self { pages_cache, file })
+        Self {
+            pages_cache,
+            file_ref: file,
+        }
     }
 
     pub fn insert(&mut self, row: &Row, page_idx: usize) -> Result<(), PagerError> {
@@ -96,13 +85,11 @@ impl Pager {
         if page_idx >= TABLE_MAX_PAGES {
             return Err(PagerError::PageIdxOutOfRange);
         }
-        if let Some(file) = &mut self.file {
-            let _ = file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64));
-            let page_to_write = self.pages_cache.get(page_idx).unwrap().as_ref().unwrap();
-            let _ = file.write_all(page_to_write.clone().serialize());
-        } else {
-            return Err(PagerError::DbClosed);
-        }
+
+        let mut file = self.file_ref.borrow_mut();
+        let _ = file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64));
+        let page_to_write = self.pages_cache.get(page_idx).unwrap().as_ref().unwrap();
+        let _ = file.write_all(page_to_write.clone().serialize());
         Ok(())
     }
 

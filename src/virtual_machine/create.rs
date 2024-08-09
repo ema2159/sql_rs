@@ -1,17 +1,18 @@
 use super::vm_error::VMError;
 use crate::backend::columns::Columns;
-use crate::backend::table::Table;
+use crate::backend::database::{Database, DatabaseError};
 use crate::sql_compiler::CreateTokens;
 
-pub(super) fn process_create(create_tokens: CreateTokens) -> Result<(), VMError> {
+pub(super) fn process_create (
+    create_tokens: CreateTokens,
+    db_instance: Option<&mut Database>,
+) -> Result<(), VMError> {
     let CreateTokens {
         table_name,
         columns: columns_to_insert,
     } = create_tokens;
 
-    // if tables.contains_key(table_name) {
-    // return Err(VMError::DuplicatedTableName(table_name.to_string()));
-    // };
+    let db_instance = db_instance.ok_or(VMError::DBClosed)?;
 
     let mut columns = Columns::new();
 
@@ -24,7 +25,12 @@ pub(super) fn process_create(create_tokens: CreateTokens) -> Result<(), VMError>
         }
     }
 
-    Table::create(table_name, columns);
+    db_instance
+        .add_table(table_name, columns)
+        .map_err(|err| match err {
+            DatabaseError::DuplicateTable => VMError::DuplicatedTableName(table_name.to_string()),
+            _ => unreachable!(),
+        })?;
 
     Ok(())
 }

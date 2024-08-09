@@ -2,12 +2,14 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum VMError {
+    #[error("Cannot perform operation. No database connection open.")]
+    DBClosed,
     #[error("Cannot create table {0}. Another table with the same name already exists")]
     DuplicatedTableName(String),
     #[error("Cannot create table. Two columns have the same name: {0}")]
     DuplicatedColumnName(String),
-    #[error("Error while writing table to disk: {0}")]
-    TableWriteError(String),
+    #[error("Error while writing to table {0}: {1}")]
+    TableWriteError(String, String),
     #[error("Error while reading table from disk: {0}")]
     TableReadError(String),
     #[error("Mismatch between number of column names ({0}) and number of values passed ({1})")]

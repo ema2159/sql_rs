@@ -1,18 +1,12 @@
-#![allow(dead_code)]
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::cell::RefCell;
+use std::fs::File;
+use std::rc::Rc;
 
-use lazy_static::lazy_static;
 use thiserror::Error;
 
 use super::columns::*;
 use super::pager::{Pager, PagerError};
 use super::row::Row;
-
-// HACK: This is a temporary global varialble in place of the sqlite_master table
-lazy_static! {
-    pub static ref COLUMNS: Mutex<HashMap<String, Columns>> = Mutex::new(HashMap::new());
-}
 
 #[derive(Debug)]
 pub struct Table {
@@ -36,28 +30,16 @@ pub enum TableError {
 impl Table {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
-    pub fn db_open(name: &str) -> Result<Self, TableError> {
-        let pager = Pager::open(&(name.to_owned() + ".db"))
-            .map_err(|err| TableError::PagerError(err.to_string()))?;
+    pub fn new(name: &str, columns: Columns, file: Rc<RefCell<File>>) -> Table {
+        let pager = Pager::new(file);
 
-        let columns_map = COLUMNS.lock().unwrap();
-        let columns = columns_map
-            .get(name)
-            .ok_or(TableError::TableDoesNotExist(name.to_string()))?
-            .clone();
-
-        Ok(Table {
+        Table {
             name: name.to_string(),
             pager,
             columns,
             curr_page_idx: 0,
             num_rows: 0,
-        })
-    }
-
-    pub fn create(name: &str, columns: Columns) {
-        let mut columns_map = COLUMNS.lock().unwrap();
-        columns_map.insert(name.to_owned(), columns);
+        }
     }
 
     fn new_page_and_insert(&mut self, row: Row) -> Result<(), TableError> {

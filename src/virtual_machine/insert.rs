@@ -1,7 +1,7 @@
 use super::vm_error::VMError;
 use crate::backend::columns::{ColumnItemType, ColumnType, Columns};
+use crate::backend::database::{Database, DatabaseError};
 use crate::backend::row::{Row, SQLType};
-use crate::backend::table::Table;
 use crate::sql_compiler::InsertTokens;
 
 fn parse_value(input: &str, column_type: &ColumnItemType) -> Option<SQLType> {
@@ -38,13 +38,18 @@ fn order_and_check_dup(items_to_add: &mut Vec<(&str, &str)>) -> Result<(), VMErr
     let items_len_before_dedup = items_to_add.len();
     items_to_add.dedup_by_key(|item| item.0);
     if items_to_add.len() != items_len_before_dedup {
-        return Err(VMError::DuplicateColumns);
+        Err(VMError::DuplicateColumns)
     } else {
         Ok(())
     }
 }
 
-pub(super) fn process_insert(insert_tokens: InsertTokens) -> Result<(), VMError> {
+pub(super) fn process_insert(
+    insert_tokens: InsertTokens,
+    db_instance: Option<&mut Database>,
+) -> Result<(), VMError> {
+    let open_database = db_instance.ok_or(VMError::DBClosed)?;
+
     println!("Insert tokens: {:?}", insert_tokens);
     let InsertTokens {
         table_name,
@@ -58,21 +63,17 @@ pub(super) fn process_insert(insert_tokens: InsertTokens) -> Result<(), VMError>
         return Err(VMError::ColumnNamesValuesMismatch(names_len, values_len));
     }
 
-    let mut items_to_add: Vec<(&str, &str)> = column_names
-        .into_iter()
-        .zip(column_values.into_iter())
-        .collect();
+    let mut items_to_add: Vec<(&str, &str)> = column_names.into_iter().zip(column_values).collect();
 
     order_and_check_dup(&mut items_to_add)?;
 
-    let db_name = table_name.to_owned();
-
-    let mut table = Table::db_open(&db_name)
-        .map_err(|table_error| VMError::TableReadError(table_error.to_string()))?;
+    let table = open_database
+        .get_table(table_name)
+        .map_err(|err| VMError::TableWriteError(table_name.to_string(), err.to_string()))?;
 
     let columns = &table.columns;
 
-    let row_to_insert = Row::new(parse_values(&columns, &mut items_to_add)?);
+    let row_to_insert = Row::new(parse_values(columns, &mut items_to_add)?);
 
     table
         .insert(row_to_insert)
@@ -82,8 +83,8 @@ pub(super) fn process_insert(insert_tokens: InsertTokens) -> Result<(), VMError>
     println!("{:?}", table.deserialize_rows());
 
     // table
-        // .db_close()
-        // .map_err(|table_error| VMError::TableWriteError(table_error.to_string()))?;
+    // .db_close()
+    // .map_err(|table_error| VMError::TableWriteError(table_error.to_string()))?;
 
     Ok(())
 }
