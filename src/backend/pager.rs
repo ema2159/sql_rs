@@ -30,7 +30,7 @@ pub enum PagerError {
 
 #[derive(Debug)]
 pub struct Pager {
-    pub pages_cache: [Option<Page>; TABLE_MAX_PAGES],
+    pages_cache: [Option<Page>; TABLE_MAX_PAGES],
     file_ref: Rc<RefCell<File>>,
 }
 
@@ -111,5 +111,9 @@ impl Pager {
             };
         }
         Ok(())
+    }
+
+    pub fn pages(&self) -> impl Iterator<Item = &Option<Page>> {
+        self.pages_cache.iter()
     }
 }

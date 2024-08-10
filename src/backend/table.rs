@@ -66,7 +66,7 @@ impl Table {
 
     pub fn deserialize_rows(&self) -> Result<Vec<Row>, TableError> {
         let mut rows: Vec<Row> = Vec::new();
-        for page in self.pager.pages_cache.iter().filter_map(|p| p.as_ref()) {
+        for page in self.pager.pages().filter_map(|p| p.as_ref()) {
             println!("{:?}", page);
             rows.append(
                 &mut page
