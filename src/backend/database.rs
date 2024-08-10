@@ -25,6 +25,14 @@ pub enum DatabaseError {
 }
 
 impl Database {
+    pub fn close(&mut self) {
+        for table in self.tables.values_mut() {
+            if let Err(err) = table.flush() {
+                eprintln!("Error flushing table {} to disk: {}", table.name, err);
+            }
+        }
+    }
+
     pub fn open(path_str: &str) -> Result<Self, DatabaseError> {
         let path = Path::new(path_str);
         let file = RefCell::new(

@@ -13,14 +13,14 @@ use metacommand_processor::process_metacommand;
 use sql_compiler::parse_statement;
 use virtual_machine as VM;
 
-fn process_input(input_str: &str, db_instance: Option<&mut Database>) {
+fn process_input(input_str: &str, db_instance: &mut Option<Database>) {
     if input_str.starts_with('.') {
-        process_metacommand(input_str);
+        process_metacommand(input_str, db_instance);
         return;
     }
     match parse_statement(input_str) {
         Ok(parsed_statement) => {
-            println!("{:?}", VM::execute_statement(parsed_statement, db_instance))
+            println!("{:?}", VM::execute_statement(parsed_statement, db_instance.as_mut()))
         }
         Err(parse_error) => println!("{}", parse_error),
     }
@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .history_with(&mut prompt_history)
             .interact_text()
         {
-            process_input(input.trim(), db_instance.as_mut());
+            process_input(input.trim(), &mut db_instance);
         }
     }
 }

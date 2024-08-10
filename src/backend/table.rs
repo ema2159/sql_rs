@@ -77,7 +77,7 @@ impl Table {
         Ok(rows)
     }
 
-    pub fn db_close(mut self) -> Result<(), TableError> {
+    pub fn flush(&mut self) -> Result<(), TableError> {
         self.pager
             .flush_all()
             .map_err(|err| TableError::PagerError(err.to_string()))?;

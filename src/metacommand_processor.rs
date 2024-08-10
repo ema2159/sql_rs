@@ -2,11 +2,15 @@ use std::env;
 use std::fs;
 use std::str::FromStr;
 
+use crate::backend::database::Database;
+
 const SUCCESS: i32 = 0;
 
 enum Metacommand {
-    Exit,
+    Close,
     Databases,
+    Exit,
+    // Open,
 }
 
 enum MetacommandErr {
@@ -39,9 +43,22 @@ fn list_db_files() -> std::io::Result<()> {
     Ok(())
 }
 
+fn close_database(db_instance: &mut Option<Database>) {
+    match db_instance {
+        Some(db) => {
+            db.close();
+            *db_instance = None;
+        }
+        None => eprintln!("No database open."),
+    }
+}
+
 fn databases_metacommand() {
     if let Err(list_db_files_err) = list_db_files() {
-        println!("Error when executing .databases metacommand: {}", list_db_files_err.to_string());
+        println!(
+            "Error when executing .databases metacommand: {}",
+            list_db_files_err.to_string()
+        );
     }
 }
 
@@ -50,18 +67,20 @@ impl FromStr for Metacommand {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.strip_prefix('.').ok_or(MetacommandErr::NotAMetacommand)? {
-            "exit" => Ok(Metacommand::Exit),
+            "close" => Ok(Metacommand::Close),
             "databases" => Ok(Metacommand::Databases),
+            "exit" => Ok(Metacommand::Exit),
             _ => Err(MetacommandErr::UnrecognizedMetacommand),
         }
     }
 }
 
-pub fn process_metacommand(metacommand_str: &str) {
+pub fn process_metacommand(metacommand_str: &str, db_instance: &mut Option<Database>) {
     if let Ok(metacommand) = Metacommand::from_str(metacommand_str) {
         match metacommand {
-            Metacommand::Exit => std::process::exit(SUCCESS),
+            Metacommand::Close => close_database(db_instance),
             Metacommand::Databases => databases_metacommand(),
+            Metacommand::Exit => std::process::exit(SUCCESS),
         }
     } else {
         println!("Unrecognized meta command {}", metacommand_str);
