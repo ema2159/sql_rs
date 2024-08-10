@@ -11,4 +11,5 @@ dialoguer = { version = "0.11.0", features = ["history"] }
 lazy_static = "1.5.0"
 nom = "7.*"
 serde = { version = "1.0.197", features = ["derive"] }
+tabled = "0.16.0"
 thiserror = "1.0.61"

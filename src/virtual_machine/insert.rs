@@ -79,8 +79,8 @@ pub(super) fn process_insert(
         .insert(row_to_insert)
         .map_err(|table_err| VMError::ItemInsertingError(table_err.to_string()))?;
 
-    println!("{:?}", table);
-    println!("{:?}", table.deserialize_rows());
+    // println!("{:?}", table);
+    // println!("{:?}", table.deserialize_rows());
 
     Ok(())
 }

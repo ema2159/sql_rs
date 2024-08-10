@@ -8,6 +8,16 @@ pub enum SQLType {
     Text(String),
 }
 
+impl ToString for SQLType {
+    // Required method
+    fn to_string(&self) -> String {
+        match self {
+            SQLType::Integer(num) => num.to_string(),
+            SQLType::Text(s) => s.to_owned()
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Row {
     attributes: Vec<SQLType>,
@@ -34,5 +44,9 @@ impl Row {
             Self::BINCODE_CONFIG,
         )?;
         Ok(Self { attributes })
+    }
+
+    pub fn to_printable(&self) -> Vec<String> {
+        self.attributes.iter().map(|attribute| attribute.to_string()).collect()
     }
 }

@@ -95,4 +95,8 @@ impl Columns {
         >(bytes, Self::BINCODE_CONFIG)?;
         Ok(Self(attributes))
     }
+
+    pub fn to_printable(&self) -> Vec<String> {
+        self.0.keys().map(|key| key.to_owned()).collect()
+    }
 }
