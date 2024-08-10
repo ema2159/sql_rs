@@ -2,12 +2,13 @@ use core::fmt::Display;
 
 use super::create::CreateTokens;
 use super::insert::InsertTokens;
+use super::select::SelectTokens;
 
 #[derive(Debug)]
 pub enum Statement<'a> {
     Create(CreateTokens<'a>),
+    Select(SelectTokens<'a>),
     Insert(InsertTokens<'a>),
-    Select,
 }
 
 #[derive(Debug)]
@@ -21,7 +22,6 @@ impl TryFrom<&str> for StatementType {
     type Error = ParseError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-
         match s.to_lowercase().as_str() {
             "create" => Ok(StatementType::Create),
             "insert" => Ok(StatementType::Insert),
@@ -37,7 +37,6 @@ pub enum ParseError {
     UnknownStatement,
 }
 
-
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -46,10 +45,7 @@ impl Display for ParseError {
                 "Error encountered when parsing statement: \n {}",
                 parse_trace
             ),
-            ParseError::UnknownStatement => write!(
-                f,
-                "Unrecognized statement"
-            ),
+            ParseError::UnknownStatement => write!(f, "Unrecognized statement"),
         }
     }
 }

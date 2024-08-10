@@ -10,8 +10,8 @@ pub enum VMError {
     DuplicatedColumnName(String),
     #[error("Error while writing to table {0}: {1}")]
     TableWriteError(String, String),
-    #[error("Error while reading table from disk: {0}")]
-    TableReadError(String),
+    #[error("Error while reading table {0}: {1}")]
+    TableReadError(String, String),
     #[error("Mismatch between number of column names ({0}) and number of values passed ({1})")]
     ColumnNamesValuesMismatch(usize, usize),
     #[error("Column {0} not in table")]
@@ -23,4 +23,3 @@ pub enum VMError {
     #[error("Error when inserting row into table: {0}")]
     ItemInsertingError(String),
 }
-

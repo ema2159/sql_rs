@@ -3,7 +3,7 @@ use crate::backend::columns::Columns;
 use crate::backend::database::{Database, DatabaseError};
 use crate::sql_compiler::CreateTokens;
 
-pub(super) fn process_create (
+pub(super) fn process_create(
     create_tokens: CreateTokens,
     db_instance: Option<&mut Database>,
 ) -> Result<(), VMError> {
@@ -12,7 +12,7 @@ pub(super) fn process_create (
         columns: columns_to_insert,
     } = create_tokens;
 
-    let db_instance = db_instance.ok_or(VMError::DBClosed)?;
+    let open_database = db_instance.ok_or(VMError::DBClosed)?;
 
     let mut columns = Columns::new();
 
@@ -25,7 +25,7 @@ pub(super) fn process_create (
         }
     }
 
-    db_instance
+    open_database
         .add_table(table_name, columns)
         .map_err(|err| match err {
             DatabaseError::DuplicateTable => VMError::DuplicatedTableName(table_name.to_string()),

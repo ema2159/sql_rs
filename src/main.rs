@@ -20,7 +20,8 @@ fn process_input(input_str: &str, db_instance: &mut Option<Database>) {
     }
     match parse_statement(input_str) {
         Ok(parsed_statement) => {
-            println!("{:?}", VM::execute_statement(parsed_statement, db_instance.as_mut()))
+            let _ = VM::execute_statement(parsed_statement, db_instance.as_mut())
+                .inspect_err(|err| println!("{}", err.to_string()));
         }
         Err(parse_error) => println!("{}", parse_error),
     }

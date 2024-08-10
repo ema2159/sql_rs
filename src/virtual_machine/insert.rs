@@ -1,6 +1,6 @@
 use super::vm_error::VMError;
 use crate::backend::columns::{ColumnItemType, ColumnType, Columns};
-use crate::backend::database::{Database, DatabaseError};
+use crate::backend::database::Database;
 use crate::backend::row::{Row, SQLType};
 use crate::sql_compiler::InsertTokens;
 
@@ -81,10 +81,6 @@ pub(super) fn process_insert(
 
     println!("{:?}", table);
     println!("{:?}", table.deserialize_rows());
-
-    // table
-    // .db_close()
-    // .map_err(|table_error| VMError::TableWriteError(table_error.to_string()))?;
 
     Ok(())
 }
