@@ -1,7 +1,4 @@
-use tabled::{
-    builder::Builder,
-    settings::style::Style,
-};
+use tabled::{builder::Builder, settings::style::Style};
 
 use super::vm_error::VMError;
 use crate::backend::database::Database;
@@ -35,7 +32,7 @@ pub(super) fn process_select(
         .get_table(table_name)
         .map_err(|err| VMError::TableReadError(table_name.to_string(), err.to_string()))?;
 
-    print_table(&table);
+    print_table(table);
 
     Ok(())
 }

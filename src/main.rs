@@ -15,7 +15,9 @@ use virtual_machine as VM;
 
 fn process_input(input_str: &str, db_instance: &mut Option<Database>) {
     if input_str.starts_with('.') {
-        process_metacommand(input_str, db_instance);
+        if let Err(metacommand_err) = process_metacommand(input_str, db_instance) {
+            println!("{}", metacommand_err)
+        }
         return;
     }
     match parse_statement(input_str) {
@@ -52,8 +54,7 @@ fn parse_args(args: Vec<String>) -> Option<Database> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
-    let mut db_from_args = parse_args(args);
-    let mut db_instance = db_from_args.take();
+    let mut db_instance = parse_args(args);
 
     let mut prompt_history = BasicHistory::new().max_entries(8).no_duplicates(true);
 

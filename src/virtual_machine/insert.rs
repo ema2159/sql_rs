@@ -50,7 +50,6 @@ pub(super) fn process_insert(
 ) -> Result<(), VMError> {
     let open_database = db_instance.ok_or(VMError::DBClosed)?;
 
-    println!("Insert tokens: {:?}", insert_tokens);
     let InsertTokens {
         table_name,
         column_names,
