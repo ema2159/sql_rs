@@ -5,6 +5,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use super::columns::*;
+use super::page::PageError;
 use super::pager::{Pager, PagerError};
 use super::row::Row;
 
@@ -21,10 +22,12 @@ pub struct Table {
 pub enum TableError {
     #[error("Cannot insert row. Pages limit was reached.")]
     TableFull,
-    #[error("Pager error when opening connection: {0}")]
-    PagerError(String),
-    #[error("Table {0} does not exist")]
-    TableDoesNotExist(String),
+    #[error("Error when opening connection: {0}")]
+    RowInsertError(PagerError),
+    #[error("Error when flushing table to disk: {0}")]
+    FlushError(PagerError),
+    #[error(transparent)]
+    PageError(#[from] PageError),
 }
 
 impl Table {
@@ -60,26 +63,21 @@ impl Table {
             }
             Err(PagerError::CacheMiss) => self.new_page_and_insert(row),
             Err(PagerError::TableFull) => Err(TableError::TableFull),
-            Err(other_err) => Err(TableError::PagerError(other_err.to_string())),
+            Err(other_err) => Err(TableError::RowInsertError(other_err)),
         }
     }
 
     pub fn deserialize_rows(&self) -> Result<Vec<Row>, TableError> {
         let mut rows: Vec<Row> = Vec::new();
         for page in self.pager.pages().filter_map(|p| p.as_ref()) {
-            rows.append(
-                &mut page
-                    .deserialize_rows()
-                    .map_err(|err| TableError::PagerError(err.to_string()))?,
-            );
+            let deserialized_rows: Result<Vec<Row>, PageError> = page.deserialize_rows();
+            rows.append(&mut deserialized_rows?);
         }
         Ok(rows)
     }
 
     pub fn flush(&mut self) -> Result<(), TableError> {
-        self.pager
-            .flush_all()
-            .map_err(|err| TableError::PagerError(err.to_string()))?;
+        self.pager.flush_all().map_err(TableError::FlushError)?;
 
         Ok(())
     }

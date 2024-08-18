@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::backend::table::TableError;
+
 #[derive(Error, Debug)]
 pub enum VMError {
     #[error("Cannot perform operation. No database connection open.")]
@@ -21,5 +23,5 @@ pub enum VMError {
     #[error("Error when parsing value {0}")]
     ItemParsingError(String),
     #[error("Error when inserting row into table: {0}")]
-    ItemInsertingError(String),
+    ItemInsertingError(#[from] TableError),
 }

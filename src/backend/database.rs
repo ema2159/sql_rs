@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
+use std::io;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -17,7 +18,7 @@ pub struct Database {
 #[derive(Error, Debug)]
 pub enum DatabaseError {
     #[error("Could not read database from disk. The following error occurred during read: {0}")]
-    ReadFromDiskError(String),
+    ReadFromDiskError(#[from] io::Error),
     #[error("Table already exists in database.")]
     DuplicateTable,
     #[error("Table does not exist in database.")]
@@ -39,8 +40,7 @@ impl Database {
             File::options()
                 .create(true)
                 .append(true)
-                .open(path)
-                .map_err(|err| DatabaseError::ReadFromDiskError(err.to_string()))?,
+                .open(path)?,
         )
         .into();
 

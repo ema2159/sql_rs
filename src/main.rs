@@ -23,7 +23,7 @@ fn process_input(input_str: &str, db_instance: &mut Option<Database>) {
     match parse_statement(input_str) {
         Ok(parsed_statement) => {
             let _ = VM::execute_statement(parsed_statement, db_instance.as_mut())
-                .inspect_err(|err| eprintln!("{}", err.to_string()));
+                .inspect_err(|err| eprintln!("{}", err));
         }
         Err(parse_error) => eprintln!("{}", parse_error),
     }
@@ -32,7 +32,7 @@ fn process_input(input_str: &str, db_instance: &mut Option<Database>) {
 fn parse_args(db_instance: &mut Option<Database>, args: Vec<String>) {
     if args.len() > 1 {
         let _ = open_metacommand(db_instance, args[1..].to_vec())
-            .inspect_err(|err| eprintln!("{}", err.to_string()));
+            .inspect_err(|err| eprintln!("{}", err));
     }
 }
 

@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::fs::File;
+use std::io;
 use std::io::{Seek, SeekFrom, Write};
 use std::rc::Rc;
 
@@ -13,9 +14,7 @@ const TABLE_MAX_PAGES: usize = 100;
 #[derive(Error, Debug)]
 pub enum PagerError {
     #[error("Could not insert row in page. The following error ocurred during insertion: {0}")]
-    PageRowInsertError(String),
-    #[error("Could not read table from disk. The following error occurred during read: {0}")]
-    ReadFromDiskError(String),
+    PageRowInsertError(#[from] PageError),
     #[error("Cannot insert row. Remaining page capacity is smaller than the row size")]
     PageFull,
     #[error("Table full")]
@@ -24,8 +23,6 @@ pub enum PagerError {
     PageIdxOutOfRange,
     #[error("Cache miss")]
     CacheMiss,
-    #[error("DB connection closed")]
-    DbClosed,
 }
 
 #[derive(Debug)]
@@ -50,14 +47,13 @@ impl Pager {
             if let Some(ref mut curr_page) = cache_elem {
                 match curr_page.insert(row.clone()) {
                     Err(PageError::PageFull) => {
-                        curr_page.write_header();
                         if page_idx >= TABLE_MAX_PAGES {
-                            return Err(PagerError::TableFull);
+                            Err(PagerError::TableFull)?;
                         };
-                        return Err(PagerError::PageFull);
+                        Err(PagerError::PageFull)?;
                     }
                     Err(other_err) => {
-                        return Err(PagerError::PageRowInsertError(other_err.to_string()))
+                        Err(other_err)?
                     }
                     Ok(()) => (),
                 }
@@ -106,7 +102,6 @@ impl Pager {
             match self.flush(i) {
                 Ok(()) => {}
                 Err(PagerError::PageIdxOutOfRange) => {}
-                Err(PagerError::DbClosed) => return Err(PagerError::DbClosed),
                 _ => unreachable!(),
             };
         }

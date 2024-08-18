@@ -19,9 +19,9 @@ pub enum PageError {
     #[error("Cannot insert row. Remaining page capacity is smaller than the row size")]
     PageFull,
     #[error("Could not serialize row. The following error was encountered: {0}")]
-    RowEncodingError(String),
+    RowEncodingError(#[from] bincode::error::EncodeError),
     #[error("Could not deserialize page. The following error ocurred during deserialization: {0}")]
-    DeserializingError(String),
+    DeserializingError(#[from] bincode::error::DecodeError),
     #[error(
         "The slice being deserialized does not correspond to a valid page. End of the slice
                 reached during deserialization"
@@ -91,7 +91,6 @@ impl Page {
     }
 
     pub fn serialize(&mut self) -> &[u8; PAGE_SIZE] {
-        self.write_header();
         &self.data
     }
 
@@ -101,7 +100,7 @@ impl Page {
         let data_slot = &mut self.data[self.curr_slot + SIZE_SLOT_SIZE..];
         let inserted_bytes = row.serialize_into(data_slot).map_err(|err| match err {
             bincode::error::EncodeError::UnexpectedEnd => PageError::PageFull,
-            _ => PageError::RowEncodingError(err.to_string()),
+            _ => err.into(),
         })?;
 
         // Insert size of serialized row in size slot at the beginning of the slot
@@ -156,8 +155,7 @@ impl Page {
                 curr_idx + Self::ROW_SIZE_SLOT_SIZE,
                 curr_idx + Self::ROW_SIZE_SLOT_SIZE + row_size as usize,
             );
-            let curr_row = Row::deserialize(&self.data[curr_row_start..curr_row_end])
-                .map_err(|err| PageError::DeserializingError(err.to_string()))?;
+            let curr_row = Row::deserialize(&self.data[curr_row_start..curr_row_end])?;
             rows_vec.push(curr_row);
             curr_idx = curr_row_end + 1;
         }

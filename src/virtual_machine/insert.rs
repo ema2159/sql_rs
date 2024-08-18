@@ -75,8 +75,7 @@ pub(super) fn process_insert(
     let row_to_insert = Row::new(parse_values(columns, &mut items_to_add)?);
 
     table
-        .insert(row_to_insert)
-        .map_err(|table_err| VMError::ItemInsertingError(table_err.to_string()))?;
+        .insert(row_to_insert)?;
 
     // println!("{:?}", table);
     // println!("{:?}", table.deserialize_rows());
