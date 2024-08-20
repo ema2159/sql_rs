@@ -70,7 +70,7 @@ impl Table {
     pub fn deserialize_rows(&self) -> Result<Vec<Row>, TableError> {
         let mut rows: Vec<Row> = Vec::new();
         for page in self.pager.pages().filter_map(|p| p.as_ref()) {
-            let deserialized_rows: Result<Vec<Row>, PageError> = page.deserialize_rows();
+            let deserialized_rows: Result<Vec<Row>, PageError> = page.deserialize_cells();
             rows.append(&mut deserialized_rows?);
         }
         Ok(rows)
