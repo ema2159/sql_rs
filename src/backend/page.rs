@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 use std::mem::{self, MaybeUninit};
 
-use bincode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::row::Row;
 
 pub const PAGE_SIZE: usize = 4096;
+const PAGE_HEADER_SIZE: usize = mem::size_of::<PageHeader>();
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 struct PageHeader {
@@ -16,6 +16,33 @@ struct PageHeader {
     num_cells: u16,
     cells_start: u16,
     right_pointer: u32,
+}
+
+impl PageHeader {
+    fn set_page_type(&mut self, val: u8, header_slice: &mut [u8]) {
+        self.page_type = val;
+        header_slice[0] = val;
+    }
+
+    fn set_first_free_block(&mut self, val: u16, header_slice: &mut [u8]) {
+        self.first_free_block = val;
+        header_slice[1..3].copy_from_slice(&val.to_be_bytes());
+    }
+
+    fn set_num_cells(&mut self, val: u16, header_slice: &mut [u8]) {
+        self.num_cells = val;
+        header_slice[3..5].copy_from_slice(&val.to_be_bytes());
+    }
+
+    fn set_cells_start(&mut self, val: u16, header_slice: &mut [u8]) {
+        self.cells_start = val;
+        header_slice[5..7].copy_from_slice(&val.to_be_bytes());
+    }
+
+    fn set_right_pointer(&mut self, val: u32, header_slice: &mut [u8]) {
+        self.right_pointer = val;
+        header_slice[7..11].copy_from_slice(&val.to_be_bytes());
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -43,8 +70,7 @@ pub enum PageError {
 
 impl Page {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
-    const HEADER_SIZE: usize = mem::size_of::<PageHeader>();
-    const START_SLOT: u16 = Self::HEADER_SIZE as u16;
+    const START_SLOT: u16 = PAGE_HEADER_SIZE as u16;
     const OFFSET_BYTE_SIZE: usize = 2;
 
     pub fn new() -> Self {
@@ -104,7 +130,6 @@ impl Page {
     // }
 
     pub fn serialize(&mut self) -> &[u8; PAGE_SIZE] {
-        self.write_header();
         &self.data
     }
 
@@ -122,7 +147,8 @@ impl Page {
             PAGE_SIZE - ((self.header.num_cells as usize) + 1) * Self::OFFSET_BYTE_SIZE;
 
         if slot_end >= start_of_offset_array {
-            self.header.first_free_block = 0;
+            self.header
+                .set_first_free_block(0, &mut self.data[..PAGE_HEADER_SIZE]);
             Err(PageError::PageFull)?
         }
 
@@ -130,20 +156,14 @@ impl Page {
         let data_slot = &mut self.data[slot_start..slot_end];
         data_slot.copy_from_slice(&encoded);
 
-        self.header.first_free_block = slot_end as u16;
-        self.header.num_cells += 1;
+        self.header
+            .set_first_free_block(slot_end as u16, &mut self.data[..PAGE_HEADER_SIZE]);
+        self.header.set_num_cells(
+            self.header.num_cells + 1,
+            &mut self.data[..PAGE_HEADER_SIZE],
+        );
         self.write_slot_to_offset_array(start_of_offset_array, slot_start as u16);
 
-        Ok(())
-    }
-
-    pub fn write_header(&mut self) -> Result<(), PageError> {
-        let header_slot = &mut self.data[..Self::HEADER_SIZE];
-        bincode::serde::encode_into_slice::<PageHeader, _>(
-            self.header.clone(),
-            header_slot,
-            Self::BINCODE_CONFIG,
-        )?;
         Ok(())
     }
 
@@ -165,7 +185,7 @@ impl Page {
     }
 
     fn get_header(&self) -> Result<PageHeader, PageError> {
-        let header_bytes = &self.data[..Self::HEADER_SIZE];
+        let header_bytes = &self.data[..PAGE_HEADER_SIZE];
         Ok(bincode::serde::decode_borrowed_from_slice::<PageHeader, _>(
             header_bytes,
             Self::BINCODE_CONFIG,
