@@ -42,10 +42,13 @@ impl Pager {
         }
     }
 
-    pub fn insert(&mut self, row: &Row, page_idx: usize) -> Result<(), PagerError> {
+    pub fn insert<T>(&mut self, data: &T, page_idx: usize) -> Result<(), PagerError>
+    where
+        T: TryInto<Rc<[u8]>, Error = ()> + Clone,
+    {
         if let Some(cache_elem) = self.pages_cache.get_mut(page_idx) {
             if let Some(ref mut curr_page) = cache_elem {
-                match curr_page.insert(row.clone()) {
+                match curr_page.insert(data.clone()) {
                     Err(PageError::PageFull) => {
                         if page_idx >= TABLE_MAX_PAGES {
                             Err(PagerError::TableFull)?;

@@ -1,4 +1,5 @@
-#![allow(dead_code)]
+use std::rc::Rc;
+
 use bincode;
 use serde::{Deserialize, Serialize};
 
@@ -38,14 +39,6 @@ impl Row {
         )
     }
 
-    pub fn deserialize(row_bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
-        let attributes = bincode::serde::decode_borrowed_from_slice::<Vec<SQLType>, _>(
-            row_bytes,
-            Self::BINCODE_CONFIG,
-        )?;
-        Ok(Self { attributes })
-    }
-
     pub fn to_printable(&self) -> Vec<String> {
         self.attributes
             .iter()
@@ -54,22 +47,27 @@ impl Row {
     }
 }
 
-impl TryInto<Vec<u8>> for Row {
-    type Error = bincode::error::EncodeError;
+impl TryInto<Rc<[u8]>> for Row {
+    type Error = ();
 
-    fn try_into(self) -> Result<Vec<u8>, Self::Error> {
-        let mut row_encoded = bincode::serde::encode_to_vec::<Vec<SQLType>, _>(
-            self.attributes,
+    fn try_into(self) -> Result<Rc<[u8]>, Self::Error> {
+        let row_encoded =
+            bincode::serde::encode_to_vec::<Vec<SQLType>, _>(self.attributes, Self::BINCODE_CONFIG)
+                .map_err(|_| ())?;
+
+        Ok(row_encoded.into())
+    }
+}
+
+impl TryFrom<Rc<[u8]>> for Row {
+    type Error = ();
+
+    fn try_from(bytes: Rc<[u8]>) -> Result<Row, Self::Error> {
+        let attributes = bincode::serde::decode_borrowed_from_slice::<Vec<SQLType>, _>(
+            &bytes,
             Self::BINCODE_CONFIG,
-        )?;
-
-        // NOTE: Encode len with row in the meantime given without a free list it is not possible
-        // to know when a cell ends when the subsequent cell is deleted.
-        let encoded_len = ((row_encoded.len() + 2) as u16).to_be_bytes();
-
-        row_encoded
-            .splice(0..0, encoded_len.iter().cloned());
-
-        Ok(row_encoded)
+        )
+        .map_err(|_| ())?;
+        Ok(Self { attributes })
     }
 }

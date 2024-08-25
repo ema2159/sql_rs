@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 use std::mem::{self, MaybeUninit};
+use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::db_cell::LeafCell;
 use super::row::Row;
 
 pub const PAGE_SIZE: usize = 4096;
@@ -15,6 +17,7 @@ struct PageHeader {
     first_free_block: u16,
     num_cells: u16,
     cells_start: u16,
+    fragmented_free_bytes: u8,
     right_pointer: u32,
 }
 
@@ -39,9 +42,14 @@ impl PageHeader {
         header_slice[5..7].copy_from_slice(&val.to_be_bytes());
     }
 
+    fn set_fragmented_free_bytes(&mut self, val: u8, header_slice: &mut [u8]) {
+        self.fragmented_free_bytes = val;
+        header_slice[7] = val;
+    }
+
     fn set_right_pointer(&mut self, val: u32, header_slice: &mut [u8]) {
         self.right_pointer = val;
-        header_slice[7..11].copy_from_slice(&val.to_be_bytes());
+        header_slice[8..12].copy_from_slice(&val.to_be_bytes());
     }
 }
 
@@ -57,10 +65,8 @@ pub enum PageError {
     CorruptData,
     #[error("Cannot insert row. Remaining page capacity is smaller than the row size")]
     PageFull,
-    #[error("Could not serialize row. The following error was encountered: {0}")]
-    RowEncodingError(#[from] bincode::error::EncodeError),
-    #[error("Could not deserialize page. The following error ocurred during deserialization: {0}")]
-    DeserializingError(#[from] bincode::error::DecodeError),
+    #[error("Could not insert")]
+    InsertError,
     #[error(
         "The slice being deserialized does not correspond to a valid page. End of the slice
                 reached during deserialization"
@@ -93,16 +99,21 @@ impl Page {
         }
     }
 
-    pub fn insert(&mut self, row: Row) -> Result<(), PageError> {
+    pub fn insert<T>(&mut self, data: T) -> Result<(), PageError>
+    where
+        T: TryInto<Rc<[u8]>, Error = ()>,
+    {
         // NOTE: If first free block in the header is equal to 0, then page is full
         if self.header.first_free_block == 0 {
             Err(PageError::PageFull)?
         }
 
         // Check if page has enough space
-        let encoded: Vec<u8> = row.try_into()?;
+        let cell_bytes: Rc<[u8]> = LeafCell::new(data)
+            .map_err(|_| PageError::InsertError)?
+            .into();
         let slot_start = self.header.first_free_block as usize;
-        let slot_end = slot_start + encoded.len();
+        let slot_end = slot_start + cell_bytes.len();
         let start_of_offset_array =
             PAGE_SIZE - ((self.header.num_cells as usize) + 1) * Self::OFFSET_BYTE_SIZE;
 
@@ -114,7 +125,7 @@ impl Page {
 
         // Insert data into slot
         let data_slot = &mut self.data[slot_start..slot_end];
-        data_slot.copy_from_slice(&encoded);
+        data_slot.copy_from_slice(&cell_bytes);
 
         self.header
             .set_first_free_block(slot_end as u16, &mut self.data[..PAGE_HEADER_SIZE]);
@@ -149,26 +160,21 @@ impl Page {
 
         let mut rows_vec: Vec<Row> = Vec::new();
         for offset in offset_bytes.into_iter().map(|x| x as usize) {
-            let cell_len = u16::from_be_bytes([
-                *self.data.get(offset).ok_or(PageError::CorruptData)?,
-                *self.data.get(offset + 1).ok_or(PageError::CorruptData)?,
-            ]) as usize;
-
-            let cell_start = offset + Self::OFFSET_BYTE_SIZE;
-            let cell_end = cell_start + cell_len;
-
-            let row_bytes = self
+            let cell: LeafCell = self
                 .data
-                .get(cell_start..cell_end)
-                .ok_or(PageError::CorruptData)?;
+                .get(offset..)
+                .ok_or(PageError::CorruptData)?
+                .try_into()
+                .map_err(|_| PageError::CorruptData)?;
 
-            let curr_row = Row::deserialize(row_bytes)?;
+            let curr_row = Row::try_from(cell.data).unwrap();
             rows_vec.push(curr_row);
         }
 
         Ok(rows_vec)
     }
 }
+
 impl Default for Page {
     fn default() -> Self {
         Page::new()
