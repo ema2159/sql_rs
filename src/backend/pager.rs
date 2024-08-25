@@ -52,9 +52,7 @@ impl Pager {
                         };
                         Err(PagerError::PageFull)?;
                     }
-                    Err(other_err) => {
-                        Err(other_err)?
-                    }
+                    Err(other_err) => Err(other_err)?,
                     Ok(()) => (),
                 }
             } else {
@@ -84,8 +82,9 @@ impl Pager {
 
         let mut file = self.file_ref.borrow_mut();
         let _ = file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64));
-        let page_to_write = self.pages_cache.get(page_idx).unwrap().as_ref().unwrap();
-        let _ = file.write_all(page_to_write.clone().serialize());
+        let page_to_write = *self.pages_cache.get(page_idx).unwrap().as_ref().unwrap();
+        let bytes: [u8; PAGE_SIZE] = page_to_write.into();
+        let _ = file.write_all(&bytes);
         Ok(())
     }
 

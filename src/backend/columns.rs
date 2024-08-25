@@ -81,22 +81,9 @@ impl Columns {
         Self(BTreeMap::<String, ColumnItemType>::new())
     }
 
-    pub fn serialize(self) -> Result<Vec<u8>, bincode::error::EncodeError> {
-        bincode::serde::encode_to_vec::<BTreeMap<String, ColumnItemType>, _>(
-            self.0,
-            Self::BINCODE_CONFIG,
-        )
-    }
-
-    pub fn deserialize(bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
-        let attributes = bincode::serde::decode_borrowed_from_slice::<
-            BTreeMap<String, ColumnItemType>,
-            _,
-        >(bytes, Self::BINCODE_CONFIG)?;
-        Ok(Self(attributes))
-    }
-
     pub fn to_printable(&self) -> Vec<String> {
         self.0.keys().map(|key| key.to_owned()).collect()
     }
 }
+
+

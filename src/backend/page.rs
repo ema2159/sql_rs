@@ -9,7 +9,7 @@ use super::row::Row;
 pub const PAGE_SIZE: usize = 4096;
 const PAGE_HEADER_SIZE: usize = mem::size_of::<PageHeader>();
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 struct PageHeader {
     page_type: u8,
     first_free_block: u16,
@@ -45,7 +45,7 @@ impl PageHeader {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Page {
     header: PageHeader,
     data: [u8; PAGE_SIZE],
@@ -91,46 +91,6 @@ impl Page {
             },
             data: uninitialized_array,
         }
-    }
-
-    // pub fn from_slice(bytes: &[u8]) -> Self {
-    //     /* For performance reasons, a page is initialized as an empty array.
-    //     It is the responsibility of the implementation to read and write the data properly.
-    //     */
-    //     let mut uninitialized_array = {
-    //         let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
-    //             unsafe { MaybeUninit::uninit().assume_init() };
-    //
-    //         unsafe { mem::transmute::<_, [u8; PAGE_SIZE]>(uninitialized_array) }
-    //     };
-    //
-    //     uninitialized_array.copy_from_slice(bytes);
-    //
-    //     let data = uninitialized_array;
-    //
-    //     // Extract number of rows
-    //     let mut num_rows_bytes: [u8; Self::NUM_ROWS_SLOT_SIZE] = [0; Self::NUM_ROWS_SLOT_SIZE];
-    //     num_rows_bytes.copy_from_slice(
-    //         &bytes[0..Self::NUM_ROWS_SLOT_SIZE], // .ok_or(PageError::EndOfSliceWhileDeserializing)?,
-    //     );
-    //     let num_rows: u16 = u16::from_be_bytes(num_rows_bytes);
-    //
-    //     // Extract first_free_block
-    //     let mut first_free_block_bytes: [u8; Self::CURR_SLOT_SLOT_SIZE] = [0; Self::CURR_SLOT_SLOT_SIZE];
-    //     first_free_block_bytes.copy_from_slice(
-    //         &bytes[Self::NUM_ROWS_SLOT_SIZE..Self::NUM_ROWS_SLOT_SIZE + Self::CURR_SLOT_SLOT_SIZE],
-    //     );
-    //     let first_free_block: usize = u16::from_be_bytes(first_free_block_bytes) as usize;
-    //
-    //     Page {
-    //         first_free_block,
-    //         num_rows,
-    //         data,
-    //     }
-    // }
-
-    pub fn serialize(&mut self) -> &[u8; PAGE_SIZE] {
-        &self.data
     }
 
     pub fn insert(&mut self, row: Row) -> Result<(), PageError> {
@@ -184,14 +144,6 @@ impl Page {
             .collect()
     }
 
-    fn get_header(&self) -> Result<PageHeader, PageError> {
-        let header_bytes = &self.data[..PAGE_HEADER_SIZE];
-        Ok(bincode::serde::decode_borrowed_from_slice::<PageHeader, _>(
-            header_bytes,
-            Self::BINCODE_CONFIG,
-        )?)
-    }
-
     pub fn deserialize_cells(&self) -> Result<Vec<Row>, PageError> {
         let offset_bytes = self.get_offset_array();
 
@@ -215,5 +167,16 @@ impl Page {
         }
 
         Ok(rows_vec)
+    }
+}
+impl Default for Page {
+    fn default() -> Self {
+        Page::new()
+    }
+}
+
+impl From<Page> for [u8; PAGE_SIZE] {
+    fn from(page: Page) -> Self {
+        page.data
     }
 }

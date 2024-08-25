@@ -1,7 +1,9 @@
 use std::cell::RefCell;
+use std::fmt;
 use std::fs::File;
 use std::rc::Rc;
 
+use tabled::{builder::Builder, settings::style::Style};
 use thiserror::Error;
 
 use super::columns::*;
@@ -80,5 +82,22 @@ impl Table {
         self.pager.flush_all().map_err(TableError::FlushError)?;
 
         Ok(())
+    }
+}
+
+impl fmt::Display for Table {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let columns = &self.columns;
+        let rows = self.deserialize_rows().unwrap();
+
+        let rows_strings: Vec<_> = rows.iter().map(|row| row.to_printable()).collect();
+
+        let mut pretty_table_builder = Builder::from(rows_strings);
+        pretty_table_builder.insert_record(0, columns.to_printable());
+
+        let mut pretty_table = pretty_table_builder.build();
+        pretty_table.with(Style::psql());
+
+        write!(f, "{}", pretty_table)
     }
 }
