@@ -38,22 +38,6 @@ impl Row {
         )
     }
 
-    pub fn serialize(self) -> Result<Vec<u8>, bincode::error::EncodeError> {
-        let mut row_encoded = bincode::serde::encode_to_vec::<Vec<SQLType>, _>(
-            self.attributes,
-            Self::BINCODE_CONFIG,
-        )?;
-
-        // NOTE: Encode len with row in the meantime given without a free list it is not possible
-        // to know when a cell ends when the subsequent cell is deleted.
-        let encoded_len = ((row_encoded.len() + 2) as u16).to_be_bytes();
-
-        row_encoded
-            .splice(0..0, encoded_len.iter().cloned());
-
-        Ok(row_encoded)
-    }
-
     pub fn deserialize(row_bytes: &[u8]) -> Result<Self, bincode::error::DecodeError> {
         let attributes = bincode::serde::decode_borrowed_from_slice::<Vec<SQLType>, _>(
             row_bytes,
@@ -67,5 +51,25 @@ impl Row {
             .iter()
             .map(|attribute| attribute.to_string())
             .collect()
+    }
+}
+
+impl TryInto<Vec<u8>> for Row {
+    type Error = bincode::error::EncodeError;
+
+    fn try_into(self) -> Result<Vec<u8>, Self::Error> {
+        let mut row_encoded = bincode::serde::encode_to_vec::<Vec<SQLType>, _>(
+            self.attributes,
+            Self::BINCODE_CONFIG,
+        )?;
+
+        // NOTE: Encode len with row in the meantime given without a free list it is not possible
+        // to know when a cell ends when the subsequent cell is deleted.
+        let encoded_len = ((row_encoded.len() + 2) as u16).to_be_bytes();
+
+        row_encoded
+            .splice(0..0, encoded_len.iter().cloned());
+
+        Ok(row_encoded)
     }
 }

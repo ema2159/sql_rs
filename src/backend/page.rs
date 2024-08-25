@@ -140,7 +140,7 @@ impl Page {
         }
 
         // Check if page has enough space
-        let encoded = row.serialize()?;
+        let encoded: Vec<u8> = row.try_into()?;
         let slot_start = self.header.first_free_block as usize;
         let slot_end = slot_start + encoded.len();
         let start_of_offset_array =
