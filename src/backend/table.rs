@@ -7,6 +7,7 @@ use tabled::{builder::Builder, settings::style::Style};
 use thiserror::Error;
 
 use super::columns::*;
+use super::cursor::DBCursor;
 use super::page::PageError;
 use super::pager::{Pager, PagerError};
 use super::row::Row;
@@ -16,7 +17,8 @@ pub struct Table {
     pub name: String,
     pub columns: Columns,
     num_rows: usize,
-    pager: Pager,
+    pager: RefCell<Pager>,
+    root_page_num: u32,
     curr_page_idx: usize,
 }
 
@@ -36,19 +38,20 @@ impl Table {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
 
     pub fn new(name: &str, columns: Columns, file: Rc<RefCell<File>>) -> Table {
-        let pager = Pager::new(file);
+        let pager = RefCell::new(Pager::new(file));
 
         Table {
             name: name.to_string(),
             pager,
             columns,
+            root_page_num: 0,
             curr_page_idx: 0,
             num_rows: 0,
         }
     }
 
-    fn new_page_and_insert(&mut self, row: Row) -> Result<(), TableError> {
-        match self.pager.new_page(self.curr_page_idx) {
+    fn new_page_and_insert(&self, row: Row) -> Result<(), TableError> {
+        match self.pager.borrow_mut().new_page(self.curr_page_idx) {
             Ok(()) => Ok(()),
             Err(PagerError::TableFull) => Err(TableError::TableFull),
             Err(_) => unreachable!(),
@@ -56,12 +59,16 @@ impl Table {
         self.insert(row)
     }
 
-    pub fn insert(&mut self, row: Row) -> Result<(), TableError> {
-        match self.pager.insert(&row, self.curr_page_idx) {
+    pub fn insert(&self, row: Row) -> Result<(), TableError> {
+        let mut cursor = DBCursor::new(self);
+        match self
+            .pager
+            .borrow_mut()
+            .insert(&mut cursor, row.rowid(), &row)
+        {
             Ok(()) => Ok(()),
             Err(PagerError::PageFull) => {
-                self.curr_page_idx += 1;
-                self.new_page_and_insert(row)
+                todo!()
             }
             Err(PagerError::CacheMiss) => self.new_page_and_insert(row),
             Err(PagerError::TableFull) => Err(TableError::TableFull),
@@ -71,7 +78,7 @@ impl Table {
 
     pub fn deserialize_rows(&self) -> Result<Vec<Row>, TableError> {
         let mut rows: Vec<Row> = Vec::new();
-        for page in self.pager.pages().filter_map(|p| p.as_ref()) {
+        for page in self.pager.borrow_mut().pages().filter_map(|p| p.as_ref()) {
             let deserialized_rows: Result<Vec<Row>, PageError> = page.deserialize_cells();
             rows.append(&mut deserialized_rows?);
         }
@@ -79,7 +86,10 @@ impl Table {
     }
 
     pub fn flush(&mut self) -> Result<(), TableError> {
-        self.pager.flush_all().map_err(TableError::FlushError)?;
+        self.pager
+            .borrow_mut()
+            .flush_all()
+            .map_err(TableError::FlushError)?;
 
         Ok(())
     }

@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use thiserror::Error;
 
+use super::cursor::DBCursor;
 use super::page::{Page, PageError, PAGE_SIZE};
-use super::row::Row;
 
 const TABLE_MAX_PAGES: usize = 100;
 
@@ -42,30 +42,24 @@ impl Pager {
         }
     }
 
-    pub fn insert<T>(&mut self, data: &T, page_idx: usize) -> Result<(), PagerError>
+    pub fn insert<T>(&mut self, cursor: &mut DBCursor, key: u64, value: &T) -> Result<(), PagerError>
     where
-        T: TryInto<Rc<[u8]>, Error = ()> + Clone,
+        T: TryInto<Box<[u8]>, Error = ()> + Clone,
     {
-        if let Some(cache_elem) = self.pages_cache.get_mut(page_idx) {
-            if let Some(ref mut curr_page) = cache_elem {
-                match curr_page.insert(data.clone()) {
-                    Err(PageError::PageFull) => {
-                        if page_idx >= TABLE_MAX_PAGES {
-                            Err(PagerError::TableFull)?;
-                        };
-                        Err(PagerError::PageFull)?;
-                    }
-                    Err(other_err) => Err(other_err)?,
-                    Ok(()) => (),
-                }
-            } else {
-                return Err(PagerError::CacheMiss);
+        let page_option = self
+            .pages_cache
+            .get_mut(cursor.page_num as usize)
+            .ok_or_else(|| PagerError::PageIdxOutOfRange)?;
+
+        if let Some(page) = page_option.as_mut() {
+            match page.insert(cursor, key, value) {
+                Ok(()) => return Ok(()),
+                Err(err) => panic!("Error while inserting record on page: {err}"),
             }
         } else {
-            return Err(PagerError::TableFull);
+            self.new_page(cursor.page_num as usize);
+            return self.insert(cursor, key, value);
         }
-
-        Ok(())
     }
 
     pub fn new_page(&mut self, page_idx: usize) -> Result<(), PagerError> {
@@ -85,7 +79,7 @@ impl Pager {
 
         let mut file = self.file_ref.borrow_mut();
         let _ = file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64));
-        let page_to_write = *self.pages_cache.get(page_idx).unwrap().as_ref().unwrap();
+        let page_to_write = self.pages_cache.get(page_idx).unwrap().as_ref().unwrap().clone();
         let bytes: [u8; PAGE_SIZE] = page_to_write.into();
         let _ = file.write_all(&bytes);
         Ok(())

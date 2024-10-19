@@ -28,7 +28,9 @@ pub struct Row {
 }
 
 impl Row {
-    const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+    const BINCODE_CONFIG: bincode::config::Configuration<
+        bincode::config::BigEndian,
+    > = bincode::config::standard().with_big_endian();
 
     pub fn new(rowid:u64, attributes: Vec<SQLType>) -> Self {
         Self { rowid, attributes }

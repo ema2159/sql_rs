@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 use std::mem::{self, MaybeUninit};
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::db_cell::LeafCell;
+use super::cursor::DBCursor;
+use super::db_cell::DBCell;
 use super::row::Row;
 
 pub const PAGE_SIZE: usize = 4096;
@@ -53,10 +55,74 @@ impl PageHeader {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default)]
+struct CellPtrArray(Vec<u16>);
+
+impl CellPtrArray {
+    const PTR_BYTE_SIZE: usize = 2;
+
+    fn read_from_slice(num_cells: usize, cell_ptr_array_start: &[u8]) -> Self {
+        let cell_ptr_array_size = num_cells * Self::PTR_BYTE_SIZE;
+        let cell_ptr_array = &cell_ptr_array_start[..cell_ptr_array_size];
+
+        Self(
+            cell_ptr_array
+                .chunks_exact(2)
+                .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+                .collect(),
+        )
+    }
+
+    fn update_pointer_array_after_insert(
+        &mut self,
+        cell_ptr_array_start: &mut [u8],
+        new_cell_ptr: u16,
+        new_cell_byte_size: u16,
+    ) {
+        let insert_pos = self.partition_point(|&cell_ptr| cell_ptr <= new_cell_ptr);
+        self.insert(insert_pos, new_cell_ptr);
+        println!("INSERT POS {:?}", insert_pos);
+        println!("NEPE {:?}", self);
+        for elem in self[..insert_pos].iter_mut() {
+            *elem -= new_cell_byte_size;
+        }
+        println!("NEPE {:?}", self);
+        self.write_pointer_array(cell_ptr_array_start);
+    }
+
+    fn write_pointer_array(&self, cell_ptr_array_start: &mut [u8]) {
+        for (idx, elem) in self.iter().enumerate() {
+            Self::write_u16_in_bytes(cell_ptr_array_start, idx, *elem);
+        }
+    }
+
+    fn write_u16_in_bytes(bytes: &mut [u8], index: usize, value: u16) {
+        let start = index * 2;
+        let new_bytes = value.to_le_bytes();
+        bytes[start] = new_bytes[0];
+        bytes[start + 1] = new_bytes[1];
+    }
+}
+
+impl DerefMut for CellPtrArray {
+    fn deref_mut<'a>(&'a mut self) -> &'a mut Vec<u16> {
+        &mut self.0
+    }
+}
+
+impl Deref for CellPtrArray {
+    type Target = Vec<u16>;
+
+    fn deref<'a>(&'a self) -> &'a Vec<u16> {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Page {
     header: PageHeader,
     data: [u8; PAGE_SIZE],
+    cell_pointer_array: CellPtrArray,
 }
 
 #[derive(Error, Debug)]
@@ -68,15 +134,13 @@ pub enum PageError {
     #[error("Could not insert")]
     InsertError,
     #[error(
-        "The slice being deserialized does not correspond to a valid page. End of the slice
-                reached during deserialization"
+        "The slice being deserialized does not correspond to a valid page. End of the slice reached during deserialization"
     )]
     EndOfSliceWhileDeserializing,
 }
 
 impl Page {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
-    const START_SLOT: u16 = PAGE_HEADER_SIZE as u16;
     const OFFSET_BYTE_SIZE: usize = 2;
 
     pub fn new() -> Self {
@@ -92,82 +156,117 @@ impl Page {
 
         Self {
             header: PageHeader {
-                first_free_block: Self::START_SLOT,
+                cells_start: PAGE_SIZE as u16 - 1,
                 ..Default::default()
             },
             data: uninitialized_array,
+            cell_pointer_array: CellPtrArray::default(),
         }
     }
 
-    pub fn insert<T>(&mut self, data: T) -> Result<(), PageError>
+    pub fn get_keys(&self) -> Result<Vec<u64>, PageError> {
+        let keys_res_iter = self
+            .cell_pointer_array
+            .iter()
+            .map(|&cell_ptr| DBCell::id_from_slice(&self.data[cell_ptr as usize..]));
+        let keys_res: Result<Vec<u64>, ()> = keys_res_iter.collect();
+        keys_res.map_err(|_| PageError::CorruptData)
+    }
+
+    pub fn leaf_find_partition(&self, new_key: u64) -> Result<usize, PageError> {
+        let keys = self.get_keys()?;
+        let partition_key = keys.partition_point(|&key| key < new_key);
+
+        if partition_key >= keys.len() {
+            return Ok(PAGE_SIZE);
+        }
+
+        let partition_point = self.cell_pointer_array[partition_key];
+
+        Ok(partition_point as usize)
+    }
+
+    pub fn insert<T>(
+        &mut self,
+        insert_cursor: &mut DBCursor,
+        key: u64,
+        value: &T,
+    ) -> Result<(), PageError>
     where
-        T: TryInto<Rc<[u8]>, Error = ()>,
+        T: TryInto<Box<[u8]>, Error = ()> + Clone,
     {
-        // NOTE: If first free block in the header is equal to 0, then page is full
-        if self.header.first_free_block == 0 {
+        if self.header.cells_start == 0 {
             Err(PageError::PageFull)?
         }
 
         // Check if page has enough space
-        let cell_bytes: Rc<[u8]> = LeafCell::new(data)
+        let cell_bytes: Rc<[u8]> = DBCell::new(key, (*value).clone())
             .map_err(|_| PageError::InsertError)?
-            .into();
-        let slot_start = self.header.first_free_block as usize;
-        let slot_end = slot_start + cell_bytes.len();
-        let start_of_offset_array =
-            PAGE_SIZE - ((self.header.num_cells as usize) + 1) * Self::OFFSET_BYTE_SIZE;
+            .try_into()
+            .map_err(|_| PageError::InsertError)?;
+        let old_cells_start = self.header.cells_start as usize;
+        let new_cells_start = old_cells_start - cell_bytes.len();
+        let end_of_ptr_array_after_insert =
+            PAGE_HEADER_SIZE + ((self.header.num_cells as usize) + 1) * Self::OFFSET_BYTE_SIZE;
 
-        if slot_end >= start_of_offset_array {
+        if new_cells_start <= end_of_ptr_array_after_insert {
             self.header
-                .set_first_free_block(0, &mut self.data[..PAGE_HEADER_SIZE]);
+                .set_cells_start(0, &mut self.data[..PAGE_HEADER_SIZE]);
             Err(PageError::PageFull)?
         }
 
-        // Insert data into slot
-        let data_slot = &mut self.data[slot_start..slot_end];
-        data_slot.copy_from_slice(&cell_bytes);
+        // ------------------ Insert data into slot ------------------
+        let partition_point = self.leaf_find_partition(key)?;
+        insert_cursor.cell_ptr_pos = partition_point - cell_bytes.len();
+        println!("CURSOR {insert_cursor:?}");
+        println!("CELL BYTES {cell_bytes:?}");
+        // let insert_cell_ptr = self.cell_pointer_array[insert_cursor.cell_ptr_pos] as usize;
+        // Make room for cell content area
+        let _ = &self.data[new_cells_start..partition_point].rotate_left(cell_bytes.len());
+        // Insert cell in slot
+        let _ =
+            &self.data[insert_cursor.cell_ptr_pos..partition_point].copy_from_slice(&cell_bytes);
 
+        // Update header
         self.header
-            .set_first_free_block(slot_end as u16, &mut self.data[..PAGE_HEADER_SIZE]);
+            .set_cells_start(new_cells_start as u16, &mut self.data[..PAGE_HEADER_SIZE]);
         self.header.set_num_cells(
             self.header.num_cells + 1,
             &mut self.data[..PAGE_HEADER_SIZE],
         );
-        self.write_slot_to_offset_array(start_of_offset_array, slot_start as u16);
+        // Update cell pointer array
+        self.cell_pointer_array.update_pointer_array_after_insert(
+            &mut self.data[PAGE_HEADER_SIZE..],
+            insert_cursor.cell_ptr_pos as u16,
+            cell_bytes.len() as u16,
+        );
+
+        println!(
+            "AAAAAAAAA {:?}",
+            self.cell_pointer_array
+                .iter()
+                .map(|elem| DBCell::id_from_slice(&self.data[*elem as usize..]))
+                .collect::<Vec<_>>()
+        );
+        println!("{:?}", &self.data[PAGE_SIZE - 100..]);
+        // println!("CELL POINTER ARRAY: {:?}", self.cell_pointer_array);
 
         Ok(())
     }
 
-    fn write_slot_to_offset_array(&mut self, start_of_offset_array: usize, slot: u16) {
-        let bytes = slot.to_be_bytes();
-        self.data[start_of_offset_array..start_of_offset_array + Self::OFFSET_BYTE_SIZE]
-            .copy_from_slice(&bytes);
-    }
-
-    fn get_offset_array(&self) -> Vec<u16> {
-        let offset_array_size = (self.header.num_cells as usize) * Self::OFFSET_BYTE_SIZE;
-        let offset_bytes = &self.data[PAGE_SIZE - offset_array_size..PAGE_SIZE];
-
-        offset_bytes
-            .chunks_exact(2)
-            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
-            .rev()
-            .collect()
-    }
-
     pub fn deserialize_cells(&self) -> Result<Vec<Row>, PageError> {
-        let offset_bytes = self.get_offset_array();
+        let pointer_bytes = &self.cell_pointer_array;
 
         let mut rows_vec: Vec<Row> = Vec::new();
-        for offset in offset_bytes.into_iter().map(|x| x as usize) {
-            let cell: LeafCell = self
+        for pointer in pointer_bytes.iter().map(|x| *x as usize) {
+            let cell: DBCell = self
                 .data
-                .get(offset..)
+                .get(pointer..)
                 .ok_or(PageError::CorruptData)?
                 .try_into()
                 .map_err(|_| PageError::CorruptData)?;
 
-            let curr_row = Row::try_from(cell.data).unwrap();
+            let curr_row = Row::try_from(&*cell.value).unwrap();
             rows_vec.push(curr_row);
         }
 
