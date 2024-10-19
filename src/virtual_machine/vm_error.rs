@@ -24,4 +24,6 @@ pub enum VMError {
     ItemParsingError(String),
     #[error("Error when inserting row into table: {0}")]
     ItemInsertingError(#[from] TableError),
+    #[error("Cannot insert row without ID in table")]
+    NoIdParsed,
 }

@@ -15,20 +15,33 @@ fn parse_value(input: &str, column_type: &ColumnItemType) -> Option<SQLType> {
 fn parse_values(
     columns: &Columns,
     items_to_add: &mut Vec<(&str, &str)>,
-) -> Result<Vec<SQLType>, VMError> {
+) -> Result<(u64, Vec<SQLType>), VMError> {
     let mut parsed_values = Vec::<SQLType>::new();
+
+    let mut id_optn = None;
 
     for (name, value) in items_to_add {
         let column_item_type = columns
             .get(*name)
             .ok_or(VMError::ColumnNotInTable(name.to_string()))?;
         if let Some(parsed_value) = parse_value(value, column_item_type) {
+            // NOTE: Harcoding ID-related stuff. This should change
+            if *name == "id" {
+                if let SQLType::UBigInt(val) = parsed_value {
+                    id_optn = Some(val);
+                }
+            }
             parsed_values.push(parsed_value);
         } else {
             return Err(VMError::ItemParsingError(value.to_string()));
         }
     }
-    Ok(parsed_values)
+
+    if let Some(id) = id_optn {
+        Ok((id, parsed_values))
+    } else {
+        Err(VMError::NoIdParsed)
+    }
 }
 
 fn order_and_check_dup(items_to_add: &mut Vec<(&str, &str)>) -> Result<(), VMError> {
@@ -72,10 +85,10 @@ pub(super) fn process_insert(
 
     let columns = &table.columns;
 
-    let row_to_insert = Row::new(parse_values(columns, &mut items_to_add)?);
+    let (id, values) = parse_values(columns, &mut items_to_add)?;
+    let row_to_insert = Row::new(id, values);
 
-    table
-        .insert(row_to_insert)?;
+    table.insert(row_to_insert)?;
 
     // println!("{:?}", table);
     // println!("{:?}", table.deserialize_rows());

@@ -24,6 +24,11 @@ fn parse_int_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&st
     Ok((remainder, ColumnItemType::Integer(IntegerType::Int)))
 }
 
+fn parse_ubigint_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&str>> {
+    let (remainder, _) = alt((tag_no_case("unsigned big int"), tag_no_case("primary key")))(input)?;
+    Ok((remainder, ColumnItemType::Integer(IntegerType::UBigInt)))
+}
+
 fn parse_text_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&str>> {
     let (remainder, num_characters) = delimited(
         tag_no_case("varchar("),
@@ -38,7 +43,7 @@ fn parse_text_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&s
 }
 
 fn parse_column_type(input: &str) -> IResult<&str, ColumnItemType, VerboseError<&str>> {
-    alt((parse_int_type, parse_text_type))(input)
+    alt((parse_int_type, parse_ubigint_type, parse_text_type))(input)
 }
 
 fn parse_columns(input: &str) -> IResult<&str, Vec<(&str, ColumnItemType)>, VerboseError<&str>> {

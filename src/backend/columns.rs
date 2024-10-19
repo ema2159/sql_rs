@@ -13,12 +13,14 @@ pub trait ColumnType {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum IntegerType {
     Int,
+    UBigInt,
 }
 
 impl ColumnType for IntegerType {
     fn validate(&self, input: &str) -> Option<SQLType> {
         match self {
             IntegerType::Int => Some(SQLType::Integer(input.parse::<i32>().ok()?)),
+            IntegerType::UBigInt => Some(SQLType::UBigInt(input.parse::<u64>().ok()?)),
         }
     }
 }
