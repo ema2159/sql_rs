@@ -81,12 +81,9 @@ impl CellPtrArray {
     ) {
         let insert_pos = self.partition_point(|&cell_ptr| cell_ptr <= new_cell_ptr);
         self.insert(insert_pos, new_cell_ptr);
-        println!("INSERT POS {:?}", insert_pos);
-        println!("NEPE {:?}", self);
         for elem in self[..insert_pos].iter_mut() {
             *elem -= new_cell_byte_size;
         }
-        println!("NEPE {:?}", self);
         self.write_pointer_array(cell_ptr_array_start);
     }
 
@@ -137,6 +134,8 @@ pub enum PageError {
         "The slice being deserialized does not correspond to a valid page. End of the slice reached during deserialization"
     )]
     EndOfSliceWhileDeserializing,
+    #[error("Cannot insert element. Key already exists.")]
+    DuplicateKey,
 }
 
 impl Page {
@@ -181,6 +180,10 @@ impl Page {
             return Ok(PAGE_SIZE);
         }
 
+        if keys[partition_key] == new_key {
+            return Err(PageError::DuplicateKey);
+        }
+
         let partition_point = self.cell_pointer_array[partition_key];
 
         Ok(partition_point as usize)
@@ -218,9 +221,6 @@ impl Page {
         // ------------------ Insert data into slot ------------------
         let partition_point = self.leaf_find_partition(key)?;
         insert_cursor.cell_ptr_pos = partition_point - cell_bytes.len();
-        println!("CURSOR {insert_cursor:?}");
-        println!("CELL BYTES {cell_bytes:?}");
-        // let insert_cell_ptr = self.cell_pointer_array[insert_cursor.cell_ptr_pos] as usize;
         // Make room for cell content area
         let _ = &self.data[new_cells_start..partition_point].rotate_left(cell_bytes.len());
         // Insert cell in slot
@@ -240,16 +240,6 @@ impl Page {
             insert_cursor.cell_ptr_pos as u16,
             cell_bytes.len() as u16,
         );
-
-        println!(
-            "AAAAAAAAA {:?}",
-            self.cell_pointer_array
-                .iter()
-                .map(|elem| DBCell::id_from_slice(&self.data[*elem as usize..]))
-                .collect::<Vec<_>>()
-        );
-        println!("{:?}", &self.data[PAGE_SIZE - 100..]);
-        // println!("CELL POINTER ARRAY: {:?}", self.cell_pointer_array);
 
         Ok(())
     }

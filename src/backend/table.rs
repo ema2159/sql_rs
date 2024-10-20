@@ -26,7 +26,7 @@ pub struct Table {
 pub enum TableError {
     #[error("Cannot insert row. Pages limit was reached.")]
     TableFull,
-    #[error("Error when opening connection: {0}")]
+    #[error("Error when inserting record: {0}")]
     RowInsertError(PagerError),
     #[error("Error when flushing table to disk: {0}")]
     FlushError(PagerError),
