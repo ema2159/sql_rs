@@ -1,8 +1,14 @@
-use std::env;
 use std::error::Error;
+use std::fs::File;
+use std::panic;
+use std::sync::Mutex;
+use std::{env, fmt::Debug};
 
 use dialoguer::{theme::ColorfulTheme, BasicHistory, Input};
 
+use tracing::{error, info, instrument, span, trace, Level};
+use tracing_subscriber::{self, filter, fmt, fmt::format::FmtSpan, prelude::*, reload};
+use tracing_subscriber::{EnvFilter, Registry};
 mod backend;
 mod metacommand_processor;
 mod sql_compiler;
@@ -13,6 +19,7 @@ use metacommand_processor::{open_metacommand, process_metacommand};
 use sql_compiler::parse_statement;
 use virtual_machine as VM;
 
+#[instrument(parent = None, level = "trace", skip(db_instance))]
 fn process_input(input_str: &str, db_instance: &mut Option<Database>) {
     if input_str.starts_with('.') {
         if let Err(metacommand_err) = process_metacommand(input_str, db_instance) {
@@ -37,6 +44,17 @@ fn parse_args(db_instance: &mut Option<Database>, args: Vec<String>) {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let traces_file = File::create("output.log")?;
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_span_events(FmtSpan::ACTIVE)
+        .with_writer(Mutex::new(traces_file))
+        .init();
+
+    panic::set_hook(Box::new(move |_panic_info| {
+        error!(parent: None, "PANIC OCCURRED HERE!");
+    }));
+
     let args: Vec<String> = env::args().collect();
     let mut db_instance = None;
 
