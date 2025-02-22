@@ -1,7 +1,10 @@
+use tracing::instrument;
+
 use super::vm_error::VMError;
 use crate::backend::database::Database;
 use crate::sql_compiler::SelectTokens;
 
+#[instrument(parent = None, ret, skip(db_instance), level = "trace")]
 pub(super) fn process_select(
     select_tokens: SelectTokens,
     db_instance: Option<&mut Database>,

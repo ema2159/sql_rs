@@ -5,6 +5,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 const PAYLOAD_SIZE_SIZE: usize = mem::size_of::<u16>();
 const ID_SIZE: usize = mem::size_of::<u64>();
@@ -32,13 +33,8 @@ impl DBCell {
         .with_big_endian()
         .with_fixed_int_encoding();
 
-    pub fn new<T>(id: u64, serializable_data: T) -> Result<Self, CellError>
-    where
-        T: TryInto<Box<[u8]>, Error = ()>,
-    {
-        let data = TryInto::<Box<[u8]>>::try_into(serializable_data)
-            .map_err(|_| CellError::DataToPayloadError)?;
-
+    #[instrument(parent = None, level = "trace")]
+    pub fn new(id: u64, data: &[u8]) -> Result<Self, CellError> {
         Ok(Self {
             payload_size_slot: 0,
             id,

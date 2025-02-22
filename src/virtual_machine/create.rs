@@ -1,8 +1,11 @@
+use tracing::{instrument, span, trace};
+
 use super::vm_error::VMError;
 use crate::backend::columns::Columns;
 use crate::backend::database::{Database, DatabaseError};
 use crate::sql_compiler::CreateTokens;
 
+#[instrument(parent = None, ret, skip(db_instance), level = "trace")]
 pub(super) fn process_create(
     create_tokens: CreateTokens,
     db_instance: Option<&mut Database>,

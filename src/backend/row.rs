@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use bincode;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SQLType {
@@ -32,6 +33,7 @@ impl Row {
         bincode::config::BigEndian,
     > = bincode::config::standard().with_big_endian();
 
+    #[instrument(parent = None, ret, level = "trace")]
     pub fn new(rowid:u64, attributes: Vec<SQLType>) -> Self {
         Self { rowid, attributes }
     }
@@ -40,6 +42,7 @@ impl Row {
         self.rowid
     }
 
+    #[instrument(parent = None, ret, level = "trace")]
     pub fn to_printable(&self) -> Vec<String> {
         self.attributes
             .iter()
@@ -51,6 +54,7 @@ impl Row {
 impl TryInto<Box<[u8]>> for Row {
     type Error = ();
 
+    #[instrument(parent = None, ret, level = "trace")]
     fn try_into(self) -> Result<Box<[u8]>, Self::Error> {
         let row_encoded = bincode::serde::encode_to_vec::<(u64, Vec<SQLType>), _>(
             (self.rowid, self.attributes),
@@ -65,6 +69,7 @@ impl TryInto<Box<[u8]>> for Row {
 impl TryFrom<&[u8]> for Row {
     type Error = ();
 
+    #[instrument(parent = None, ret, level = "trace")]
     fn try_from(bytes: &[u8]) -> Result<Row, Self::Error> {
         let (rowid, attributes) = bincode::serde::decode_borrowed_from_slice::<(u64, Vec<SQLType>), _>(
             &bytes,

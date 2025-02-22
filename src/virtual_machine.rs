@@ -9,8 +9,10 @@ mod vm_error;
 use create::process_create;
 use insert::process_insert;
 use select::process_select;
+use tracing::instrument;
 use vm_error::VMError;
 
+#[instrument(parent = None, ret, skip(db_instance), level = "trace")]
 pub fn execute_statement(
     statement: Statement,
     db_instance: Option<&mut Database>,

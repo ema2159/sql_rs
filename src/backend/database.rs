@@ -10,6 +10,7 @@ use thiserror::Error;
 use super::columns::Columns;
 use super::table::Table;
 
+#[derive(Debug)]
 pub struct Database {
     file: Rc<RefCell<File>>,
     tables: HashMap<String, Table>,
@@ -36,13 +37,7 @@ impl Database {
 
     pub fn open(path_str: &str) -> Result<Self, DatabaseError> {
         let path = Path::new(path_str);
-        let file = RefCell::new(
-            File::options()
-                .create(true)
-                .append(true)
-                .open(path)?,
-        )
-        .into();
+        let file = RefCell::new(File::options().create(true).append(true).open(path)?).into();
 
         let tables = HashMap::new();
 

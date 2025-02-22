@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 
 use bincode;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 pub trait ColumnType {
     fn validate(&self, input: &str) -> Option<SQLType>;
@@ -17,6 +18,7 @@ pub enum IntegerType {
 }
 
 impl ColumnType for IntegerType {
+    #[instrument(parent = None, ret, level = "trace")]
     fn validate(&self, input: &str) -> Option<SQLType> {
         match self {
             IntegerType::Int => Some(SQLType::Integer(input.parse::<i32>().ok()?)),
@@ -31,6 +33,7 @@ pub enum TextType {
 }
 
 impl ColumnType for TextType {
+    #[instrument(parent = None, ret, level = "trace")]
     fn validate(&self, input: &str) -> Option<SQLType> {
         match self {
             TextType::Varchar(max_size) => {
@@ -54,6 +57,7 @@ pub enum ColumnItemType {
 pub struct Columns(pub BTreeMap<String, ColumnItemType>);
 
 impl From<Vec<(&str, ColumnItemType)>> for Columns {
+    #[instrument(parent = None, ret, level = "trace")]
     fn from(columns_vec: Vec<(&str, ColumnItemType)>) -> Self {
         let columns_map = columns_vec
             .into_iter()
@@ -79,10 +83,12 @@ impl DerefMut for Columns {
 
 impl Columns {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+    #[instrument(parent = None, ret, level = "trace")]
     pub fn new() -> Self {
         Self(BTreeMap::<String, ColumnItemType>::new())
     }
 
+    #[instrument(parent = None, ret, level = "trace")]
     pub fn to_printable(&self) -> Vec<String> {
         self.0.keys().map(|key| key.to_owned()).collect()
     }

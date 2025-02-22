@@ -1,9 +1,12 @@
+use tracing::instrument;
+
 use super::vm_error::VMError;
 use crate::backend::columns::{ColumnItemType, ColumnType, Columns};
 use crate::backend::database::Database;
 use crate::backend::row::{Row, SQLType};
 use crate::sql_compiler::InsertTokens;
 
+#[instrument(parent = None, ret, level = "trace")]
 fn parse_value(input: &str, column_type: &ColumnItemType) -> Option<SQLType> {
     match column_type {
         ColumnItemType::Integer(int_type) => int_type.validate(input),
@@ -12,6 +15,7 @@ fn parse_value(input: &str, column_type: &ColumnItemType) -> Option<SQLType> {
     }
 }
 
+#[instrument(parent = None, ret, level = "trace")]
 fn parse_values(
     columns: &Columns,
     items_to_add: &mut Vec<(&str, &str)>,
@@ -44,6 +48,7 @@ fn parse_values(
     }
 }
 
+#[instrument(parent = None, ret, level = "trace")]
 fn order_and_check_dup(items_to_add: &mut Vec<(&str, &str)>) -> Result<(), VMError> {
     // Sort elements to be added in a predictable way
     items_to_add.sort_unstable_by_key(|item| item.0);
@@ -57,6 +62,7 @@ fn order_and_check_dup(items_to_add: &mut Vec<(&str, &str)>) -> Result<(), VMErr
     }
 }
 
+#[instrument(parent = None, ret, skip(db_instance), level = "trace")]
 pub(super) fn process_insert(
     insert_tokens: InsertTokens,
     db_instance: Option<&mut Database>,

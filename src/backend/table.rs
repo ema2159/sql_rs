@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use tabled::{builder::Builder, settings::style::Style};
 use thiserror::Error;
+use tracing::instrument;
 
 use super::columns::*;
 use super::cursor::DBCursor;
@@ -19,7 +20,6 @@ pub struct Table {
     num_rows: usize,
     pager: RefCell<Pager>,
     root_page_num: u32,
-    curr_page_idx: usize,
 }
 
 #[derive(Error, Debug)]
@@ -28,6 +28,8 @@ pub enum TableError {
     TableFull,
     #[error("Error when inserting record: {0}")]
     RowInsertError(PagerError),
+    #[error("Error when serializing record")]
+    RowSerializeError,
     #[error("Error when flushing table to disk: {0}")]
     FlushError(PagerError),
     #[error(transparent)]
@@ -35,47 +37,36 @@ pub enum TableError {
 }
 
 impl Table {
-    const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
-
+    #[instrument(parent = None, level = "trace")]
     pub fn new(name: &str, columns: Columns, file: Rc<RefCell<File>>) -> Table {
-        let pager = RefCell::new(Pager::new(file));
+        let root_page_num = 0;
+        let pager = RefCell::new(Pager::new(file, root_page_num));
 
         Table {
             name: name.to_string(),
             pager,
             columns,
-            root_page_num: 0,
-            curr_page_idx: 0,
+            root_page_num,
             num_rows: 0,
         }
     }
 
-    fn new_page_and_insert(&self, row: Row) -> Result<(), TableError> {
-        match self.pager.borrow_mut().new_page(self.curr_page_idx) {
-            Ok(()) => Ok(()),
-            Err(PagerError::TableFull) => Err(TableError::TableFull),
-            Err(_) => unreachable!(),
-        }?;
-        self.insert(row)
-    }
-
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn insert(&self, row: Row) -> Result<(), TableError> {
+        let row_id = row.rowid();
+        let data =
+            TryInto::<Box<[u8]>>::try_into(row).map_err(|_| TableError::RowSerializeError)?;
         let mut cursor = DBCursor::new(self);
-        match self
-            .pager
-            .borrow_mut()
-            .insert(&mut cursor, row.rowid(), &row)
-        {
+        cursor.page_num = self.root_page_num;
+
+        match self.pager.borrow_mut().insert(&mut cursor, row_id, &data) {
             Ok(()) => Ok(()),
-            Err(PagerError::PageFull) => {
-                todo!()
-            }
-            Err(PagerError::CacheMiss) => self.new_page_and_insert(row),
             Err(PagerError::TableFull) => Err(TableError::TableFull),
             Err(other_err) => Err(TableError::RowInsertError(other_err)),
         }
     }
 
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn deserialize_rows(&self) -> Result<Vec<Row>, TableError> {
         let mut rows: Vec<Row> = Vec::new();
         for page in self.pager.borrow_mut().pages().filter_map(|p| p.as_ref()) {
@@ -85,6 +76,7 @@ impl Table {
         Ok(rows)
     }
 
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn flush(&mut self) -> Result<(), TableError> {
         self.pager
             .borrow_mut()
@@ -96,6 +88,7 @@ impl Table {
 }
 
 impl fmt::Display for Table {
+    #[instrument(parent = None, skip(f), ret, level = "trace")]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let columns = &self.columns;
         let rows = self.deserialize_rows().unwrap();
