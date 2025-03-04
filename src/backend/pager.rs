@@ -158,7 +158,7 @@ impl Pager {
             key_insert_position,
             left_page_last_key,
             &[],
-            Some(left_page_number as u32),
+            Some(left_page_number),
         )?;
 
         new_root.set_right_pointer(right_page_number);
@@ -237,7 +237,7 @@ impl Pager {
                 .ok_or(PagerError::PageIdxOutOfRange)?
                 .as_ref();
             let page = page_opt.ok_or(PagerError::PageNonExistent)?;
-            tree_builder.begin_child(format!("{}", page));
+            tree_builder.begin_child(format!("{}{}", page_num, page));
             for child_num in page.children_iter() {
                 add_page_recursively(pager, tree_builder, child_num?)?
             }

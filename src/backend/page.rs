@@ -312,7 +312,7 @@ impl Page {
         left_child: Option<u32>,
     ) -> Result<(), PageError> {
         // Check if page has enough space
-        let cell_bytes: Rc<[u8]> = DBCell::new(key, value, None)
+        let cell_bytes: Rc<[u8]> = DBCell::new(key, value, left_child)
             .map_err(|_| PageError::InsertError)?
             .try_into()
             .map_err(|_| PageError::InsertError)?;
@@ -452,9 +452,9 @@ impl fmt::Display for Page {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let keys = self.get_keys();
         if *self.get_page_type() == PageType::Interior {
-            write!(f, "Interior: [{:?}]", keys)
+            write!(f, "(Interior): [{:?}]", keys)
         } else {
-            write!(f, "Leaf: [{:?}]", keys)
+            write!(f, "(Leaf): [{:?}]", keys)
         }
     }
 }
