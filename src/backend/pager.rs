@@ -1,12 +1,16 @@
 use std::cell::RefCell;
+use std::fmt;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::rc::Rc;
 
+use ptree::item::StringItem;
+use ptree::{print_tree, write_tree, TreeBuilder};
 use thiserror::Error;
 use tracing::{instrument, trace};
 
 use super::cursor::DBCursor;
+use super::db_cell::DBCell;
 use super::page::{Page, PageError, PageType, PAGE_SIZE};
 
 const TABLE_MAX_PAGES: usize = 100;
@@ -23,6 +27,8 @@ pub enum PagerError {
     PageFull,
     #[error("Could not insert row in page. The following error ocurred during insertion: {0}")]
     PageRowInsertError(#[from] PageError),
+    #[error("Trying to access non-existing page")]
+    PageNonExistent,
     #[error("Table full")]
     TableFull,
 }
@@ -50,6 +56,29 @@ impl Pager {
         }
     }
 
+    pub fn get_insertion_position(
+        &self,
+        cursor: &mut DBCursor,
+        key: u64,
+    ) -> Result<(), PagerError> {
+        let page_option = self
+            .pages_cache
+            .get(cursor.page_num as usize)
+            .ok_or(PagerError::PageIdxOutOfRange)?;
+
+        if let Some(curr_page) = page_option {
+            if *curr_page.get_page_type() == PageType::Leaf {
+                let partition = curr_page.find_partition(key)?;
+                cursor.cell_ptr_pos = partition;
+            } else {
+                let next_page_number = curr_page.get_next_page_pointer(key)?;
+                cursor.page_num = next_page_number;
+                self.get_insertion_position(cursor, key)?;
+            }
+        }
+        Ok(())
+    }
+
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn insert(
         &mut self,
@@ -71,9 +100,10 @@ impl Pager {
             };
             cursor.cell_ptr_pos = partition?;
 
-            match curr_page.insert(cursor.cell_ptr_pos, key, value) {
+            match curr_page.insert(cursor.cell_ptr_pos, key, value, None) {
                 Ok(()) => {
                     self.pages_cache[cursor.page_num as usize] = Some(curr_page);
+                    self.print_tree();
                     Ok(())
                 }
                 Err(PageError::PageFull) => {
@@ -90,6 +120,7 @@ impl Pager {
                         self.handle_root_split(curr_page, new_page, new_page_number)?;
                     }
 
+                    self.print_tree();
                     Ok(())
                 }
                 Err(err) => {
@@ -98,6 +129,7 @@ impl Pager {
                 }
             }
         } else {
+            todo!();
             // Cache miss
             self.get_page_from_disk(cursor);
             self.insert(cursor, key, value)
@@ -125,7 +157,8 @@ impl Pager {
         new_root.insert(
             key_insert_position,
             left_page_last_key,
-            &left_page_number.to_be_bytes(),
+            &[],
+            Some(left_page_number as u32),
         )?;
 
         new_root.set_right_pointer(right_page_number);
@@ -190,5 +223,34 @@ impl Pager {
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn pages(&self) -> impl Iterator<Item = &Option<Page>> {
         self.pages_cache.iter()
+    }
+
+    fn create_tree(&self) -> Result<StringItem, PagerError> {
+        fn add_page_recursively(
+            pager: &Pager,
+            tree_builder: &mut TreeBuilder,
+            page_num: u32,
+        ) -> Result<(), PagerError> {
+            let page_opt = pager
+                .pages_cache
+                .get(page_num as usize)
+                .ok_or(PagerError::PageIdxOutOfRange)?
+                .as_ref();
+            let page = page_opt.ok_or(PagerError::PageNonExistent)?;
+            tree_builder.begin_child(format!("{}", page));
+            for child_num in page.children_iter() {
+                add_page_recursively(pager, tree_builder, child_num?)?
+            }
+            tree_builder.end_child();
+            Ok(())
+        }
+        let mut tree_builder = TreeBuilder::new("DB tree".to_string());
+        add_page_recursively(self, &mut tree_builder, self.root_page_num)?;
+        Ok(tree_builder.build())
+    }
+
+    pub fn print_tree(&self) {
+        let tree = self.create_tree().unwrap();
+        print_tree(&tree);
     }
 }

@@ -9,7 +9,7 @@ use tracing::instrument;
 
 use super::columns::*;
 use super::cursor::DBCursor;
-use super::page::PageError;
+use super::page::{PageError, PageType};
 use super::pager::{Pager, PagerError};
 use super::row::Row;
 
@@ -57,7 +57,10 @@ impl Table {
         let data =
             TryInto::<Box<[u8]>>::try_into(row).map_err(|_| TableError::RowSerializeError)?;
         let mut cursor = DBCursor::new(self);
-        cursor.page_num = self.root_page_num;
+        self.pager
+            .borrow()
+            .get_insertion_position(&mut cursor, row_id)
+            .map_err(TableError::RowInsertError)?;
 
         match self.pager.borrow_mut().insert(&mut cursor, row_id, &data) {
             Ok(()) => Ok(()),
@@ -70,8 +73,10 @@ impl Table {
     pub fn deserialize_rows(&self) -> Result<Vec<Row>, TableError> {
         let mut rows: Vec<Row> = Vec::new();
         for page in self.pager.borrow_mut().pages().filter_map(|p| p.as_ref()) {
-            let deserialized_rows: Result<Vec<Row>, PageError> = page.deserialize_cells();
-            rows.append(&mut deserialized_rows?);
+            if *page.get_page_type() == PageType::Leaf {
+                let deserialized_rows: Result<Vec<Row>, PageError> = page.deserialize_cells();
+                rows.append(&mut deserialized_rows?);
+            }
         }
         Ok(rows)
     }

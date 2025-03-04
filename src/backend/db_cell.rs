@@ -19,10 +19,10 @@ pub enum CellError {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DBCell {
-    payload_size_slot: u16,
+    payload_size: u16,
     pub id: u64,
-    pub value: Box<[u8]>,
-    left_child: u32,
+    pub payload: Box<[u8]>,
+    pub left_child: u32,
 }
 
 impl DBCell {
@@ -34,12 +34,13 @@ impl DBCell {
         .with_fixed_int_encoding();
 
     #[instrument(parent = None, level = "trace")]
-    pub fn new(id: u64, data: &[u8]) -> Result<Self, CellError> {
+    pub fn new(id: u64, data: &[u8], left_child_optn: Option<u32>) -> Result<Self, CellError> {
+        let left_child = left_child_optn.unwrap_or(0);
         Ok(Self {
-            payload_size_slot: 0,
+            payload_size: data.len() as u16,
             id,
-            value: data.into(),
-            left_child: 0,
+            payload: data.into(),
+            left_child,
         })
     }
 
@@ -63,12 +64,9 @@ impl TryInto<Rc<[u8]>> for DBCell {
     type Error = ();
 
     fn try_into(self) -> Result<Rc<[u8]>, Self::Error> {
-        let mut cell_encoded =
+        let cell_encoded =
             bincode::serde::encode_to_vec::<DBCell, _>(self, Self::BINCODE_CONFIG)
                 .map_err(|_| ())?;
-        let payload_size: u16 = (cell_encoded.len() - PAYLOAD_SIZE_SIZE) as u16;
-
-        cell_encoded[..PAYLOAD_SIZE_SIZE].copy_from_slice(&payload_size.to_be_bytes());
 
         Ok(cell_encoded.into())
     }

@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use std::fmt;
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -11,12 +12,12 @@ use super::cursor::DBCursor;
 use super::db_cell::DBCell;
 use super::row::Row;
 
-pub const PAGE_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 512;
 const PAGE_HEADER_SIZE: usize = mem::size_of::<PageHeader>();
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 struct PageHeader {
-    page_type: u8,
+    page_type: PageType,
     first_free_block: u16,
     num_cells: u16,
     cells_start: u16,
@@ -25,9 +26,9 @@ struct PageHeader {
 }
 
 impl PageHeader {
-    fn set_page_type(&mut self, val: u8, header_slice: &mut [u8]) {
-        self.page_type = val;
-        header_slice[0] = val;
+    fn set_page_type(&mut self, val: PageType, header_slice: &mut [u8]) {
+        self.page_type = val.clone();
+        header_slice[0] = val as u8;
     }
 
     fn set_first_free_block(&mut self, val: u16, header_slice: &mut [u8]) {
@@ -160,11 +161,12 @@ pub enum PageError {
     CannotGetFirstOrLastKey,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum PageType {
-    Interior = 0x05,
+    #[default]
     Leaf = 0x0d,
+    Interior = 0x05,
 }
 
 impl Page {
@@ -184,7 +186,7 @@ impl Page {
         };
 
         let mut header = PageHeader::default();
-        header.set_page_type(page_type as u8, &mut uninitialized_array);
+        header.set_page_type(page_type, &mut uninitialized_array);
         header.set_cells_start(PAGE_SIZE as u16, &mut uninitialized_array);
 
         Self {
@@ -212,7 +214,7 @@ impl Page {
             .for_each(|ptr| *ptr += shift as u16);
 
         let mut header = PageHeader::default();
-        header.set_page_type(PageType::Leaf as u8, &mut new_page_bytes);
+        header.set_page_type(PageType::Leaf, &mut new_page_bytes);
         header.set_cells_start(cells_start as u16, &mut new_page_bytes);
 
         let mut new_page = Self {
@@ -237,6 +239,11 @@ impl Page {
         );
 
         new_page
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
+    pub fn get_page_type(&self) -> &PageType {
+        &self.header.page_type
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
@@ -270,6 +277,15 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    pub fn get_next_page_pointer(&self, key: u64) -> Result<u32, PageError> {
+        let partition = self.find_partition(key)?;
+        let next_page_cell: DBCell = self.data[partition..]
+            .try_into()
+            .map_err(|_| PageError::CorruptData)?;
+        Ok(next_page_cell.left_child)
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn find_partition(&self, new_key: u64) -> Result<usize, PageError> {
         let keys = self.get_keys()?;
         let partition_key = keys.partition_point(|&key| key < new_key);
@@ -288,9 +304,15 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    pub fn insert(&mut self, cell_ptr_pos: usize, key: u64, value: &[u8]) -> Result<(), PageError> {
+    pub fn insert(
+        &mut self,
+        cell_ptr_pos: usize,
+        key: u64,
+        value: &[u8],
+        left_child: Option<u32>,
+    ) -> Result<(), PageError> {
         // Check if page has enough space
-        let cell_bytes: Rc<[u8]> = DBCell::new(key, value)
+        let cell_bytes: Rc<[u8]> = DBCell::new(key, value, None)
             .map_err(|_| PageError::InsertError)?
             .try_into()
             .map_err(|_| PageError::InsertError)?;
@@ -365,15 +387,40 @@ impl Page {
             .set_right_pointer(right_pointer, &mut self.data[..PAGE_HEADER_SIZE]);
     }
 
+    #[instrument(parent = None, skip(self), level = "trace")]
+    pub fn cells_iter(&self) -> impl Iterator<Item = Result<DBCell, PageError>> + '_ {
+        self.cell_pointer_array
+            .iter()
+            .map(|pointer| *pointer as usize)
+            .map(
+                |pointer| match self.data.get(pointer..).ok_or(PageError::CorruptData) {
+                    Ok(page_data) => page_data.try_into().map_err(|_| PageError::CorruptData),
+                    Err(err) => Err(err),
+                },
+            )
+    }
+
+    #[instrument(parent = None, skip(self), level = "trace")]
+    pub fn children_iter(&self) -> impl Iterator<Item = Result<u32, PageError>> + '_ {
+        self.cells_iter()
+            .map(|cell_result| match cell_result {
+                Ok(cell) => Ok(cell.left_child),
+                Err(err) => Err(err),
+            })
+            .chain(std::iter::once(Ok(self.header.right_pointer)))
+            .filter_map(|child_num| match child_num {
+                Ok(0) => None,
+                Ok(cell_num) => Some(Ok(cell_num)),
+                Err(err) => Some(Err(err)),
+            })
+    }
+
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn deserialize_cells(&self) -> Result<Vec<Row>, PageError> {
         let pointer_bytes = &self.cell_pointer_array;
 
         let mut rows_vec: Vec<Row> = Vec::new();
         for pointer in pointer_bytes.iter().map(|x| *x as usize) {
-            let data_slice = self
-                .data
-                .get(pointer..);
             let cell: DBCell = self
                 .data
                 .get(pointer..)
@@ -381,7 +428,7 @@ impl Page {
                 .try_into()
                 .map_err(|_| PageError::CorruptData)?;
 
-            let curr_row = Row::try_from(&*cell.value).unwrap();
+            let curr_row = Row::try_from(&*cell.payload).unwrap();
             rows_vec.push(curr_row);
         }
 
@@ -398,5 +445,16 @@ impl Default for Page {
 impl From<Page> for [u8; PAGE_SIZE] {
     fn from(page: Page) -> Self {
         page.data
+    }
+}
+
+impl fmt::Display for Page {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let keys = self.get_keys();
+        if *self.get_page_type() == PageType::Interior {
+            write!(f, "Interior: [{:?}]", keys)
+        } else {
+            write!(f, "Leaf: [{:?}]", keys)
+        }
     }
 }
