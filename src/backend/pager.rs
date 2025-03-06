@@ -56,6 +56,7 @@ impl Pager {
         }
     }
 
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn get_insertion_position(
         &self,
         cursor: &mut DBCursor,
@@ -92,14 +93,6 @@ impl Pager {
             .ok_or(PagerError::PageIdxOutOfRange)?;
 
         if let Some(mut curr_page) = page_option.take() {
-            let partition = curr_page.find_partition(key);
-            if partition.is_err() {
-                self.pages_cache[cursor.page_num as usize] = Some(curr_page);
-                partition?;
-                unreachable!()
-            };
-            cursor.cell_ptr_pos = partition?;
-
             match curr_page.insert(cursor.cell_ptr_pos, key, value, None) {
                 Ok(()) => {
                     self.pages_cache[cursor.page_num as usize] = Some(curr_page);
