@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::backend::table::Table;
 
 #[derive(Debug, Clone)]
@@ -17,5 +19,11 @@ where
             page_num: 0,
             cell_ptr_pos: 0,
         }
+    }
+}
+
+impl fmt::Display for DBCursor<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Cursor: [Table {}], [Page Num {}], [Cell Ptr Position {}]", self.table.name, self.page_num, self.cell_ptr_pos)
     }
 }
