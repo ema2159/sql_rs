@@ -279,6 +279,9 @@ impl Page {
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn get_next_page_pointer(&self, key: u64) -> Result<u32, PageError> {
         let partition = self.find_partition(key)?;
+        if partition >= PAGE_SIZE {
+            return Ok(self.header.right_pointer);
+        }
         let next_page_cell: DBCell = self.data[partition..]
             .try_into()
             .map_err(|_| PageError::CorruptData)?;
