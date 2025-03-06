@@ -95,7 +95,7 @@ impl Pager {
         if let Some(mut curr_page) = page_option.take() {
             match curr_page.insert(cursor.cell_ptr_pos, key, value, None) {
                 Ok(()) => {
-                    self.pages_cache[cursor.page_num as usize] = Some(curr_page);
+                    self.page_write(curr_page, cursor.page_num as usize);
                     self.print_tree();
                     Ok(())
                 }
