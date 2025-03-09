@@ -419,23 +419,23 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    pub fn deserialize_cells(&self) -> Result<Vec<Row>, PageError> {
-        let pointer_bytes = &self.cell_pointer_array;
-
-        let mut rows_vec: Vec<Row> = Vec::new();
-        for pointer in pointer_bytes.iter().map(|x| *x as usize) {
-            let cell: DBCell = self
-                .data
-                .get(pointer..)
-                .ok_or(PageError::CorruptData)?
-                .try_into()
-                .map_err(|_| PageError::CorruptData)?;
-
-            let curr_row = Row::try_from(&*cell.payload).unwrap();
-            rows_vec.push(curr_row);
-        }
-
-        Ok(rows_vec)
+    pub fn rows_iter(&self) -> impl Iterator<Item = Result<Row, PageError>> + '_ {
+        self.cell_pointer_array
+            .iter()
+            .map(|pointer| {
+                match self
+                    .data
+                    .get(*pointer as usize..)
+                    .ok_or(PageError::CorruptData)
+                {
+                    Ok(page_data) => page_data.try_into().map_err(|_| PageError::CorruptData),
+                    Err(err) => Err(err),
+                }
+            })
+            .map(|cell_result: Result<DBCell, PageError>| match cell_result {
+                Ok(cell) => Row::try_from(&*cell.payload).map_err(|_| PageError::CorruptData),
+                Err(err) => Err(err),
+            })
     }
 }
 

@@ -29,12 +29,11 @@ pub struct Row {
 }
 
 impl Row {
-    const BINCODE_CONFIG: bincode::config::Configuration<
-        bincode::config::BigEndian,
-    > = bincode::config::standard().with_big_endian();
+    const BINCODE_CONFIG: bincode::config::Configuration<bincode::config::BigEndian> =
+        bincode::config::standard().with_big_endian();
 
     #[instrument(parent = None, ret, level = "trace")]
-    pub fn new(rowid:u64, attributes: Vec<SQLType>) -> Self {
+    pub fn new(rowid: u64, attributes: Vec<SQLType>) -> Self {
         Self { rowid, attributes }
     }
 
@@ -43,11 +42,10 @@ impl Row {
     }
 
     #[instrument(parent = None, ret, level = "trace")]
-    pub fn to_printable(&self) -> Vec<String> {
+    pub fn to_printable(&self) -> impl Iterator<Item = String> + '_ {
         self.attributes
             .iter()
             .map(|attribute| attribute.to_string())
-            .collect()
     }
 }
 
@@ -71,10 +69,10 @@ impl TryFrom<&[u8]> for Row {
 
     #[instrument(parent = None, ret, level = "trace")]
     fn try_from(bytes: &[u8]) -> Result<Row, Self::Error> {
-        let (rowid, attributes) = bincode::serde::decode_borrowed_from_slice::<(u64, Vec<SQLType>), _>(
-            &bytes,
-            Self::BINCODE_CONFIG,
-        )
+        let (rowid, attributes) = bincode::serde::decode_borrowed_from_slice::<
+            (u64, Vec<SQLType>),
+            _,
+        >(&bytes, Self::BINCODE_CONFIG)
         .map_err(|_| ())?;
         Ok(Self { rowid, attributes })
     }

@@ -50,13 +50,13 @@ impl Pager {
 
         Self {
             num_pages: 1,
-            pages_cache: pages_cache.into(),
+            pages_cache,
             root_page_num,
             file_ref: file,
         }
     }
 
-    #[instrument(parent = None, skip(self), ret, level = "trace")]
+    #[instrument(parent = None, skip(self, cursor),ret, level = "trace")]
     pub fn get_insertion_position(
         &self,
         cursor: &mut DBCursor,
@@ -219,6 +219,7 @@ impl Pager {
     }
 
     fn create_tree(&self) -> Result<StringItem, PagerError> {
+        #[instrument(parent = None, skip(pager, tree_builder), ret, level = "trace")]
         fn add_page_recursively(
             pager: &Pager,
             tree_builder: &mut TreeBuilder,

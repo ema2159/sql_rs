@@ -74,7 +74,7 @@ impl Table {
         let mut rows: Vec<Row> = Vec::new();
         for page in self.pager.borrow_mut().pages().filter_map(|p| p.as_ref()) {
             if *page.get_page_type() == PageType::Leaf {
-                let deserialized_rows: Result<Vec<Row>, PageError> = page.deserialize_cells();
+                let deserialized_rows: Result<Vec<Row>, PageError> = page.rows_iter().collect();
                 rows.append(&mut deserialized_rows?);
             }
         }
@@ -93,15 +93,18 @@ impl Table {
 }
 
 impl fmt::Display for Table {
-    #[instrument(parent = None, skip(f), ret, level = "trace")]
+    #[instrument(parent = None, skip(self, f), ret, level = "trace")]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let columns = &self.columns;
         let rows = self.deserialize_rows().unwrap();
 
-        let rows_strings: Vec<_> = rows.iter().map(|row| row.to_printable()).collect();
+        let rows_strings: Vec<_> = rows
+            .iter()
+            .map(|row| row.to_printable().collect::<Vec<_>>())
+            .collect();
 
         let mut pretty_table_builder = Builder::from(rows_strings);
-        pretty_table_builder.insert_record(0, columns.to_printable());
+        pretty_table_builder.insert_record(0, columns.to_printable().collect::<Vec<_>>());
 
         let mut pretty_table = pretty_table_builder.build();
         pretty_table.with(Style::psql());

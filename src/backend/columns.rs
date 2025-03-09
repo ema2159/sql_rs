@@ -89,8 +89,8 @@ impl Columns {
     }
 
     #[instrument(parent = None, ret, level = "trace")]
-    pub fn to_printable(&self) -> Vec<String> {
-        self.0.keys().map(|key| key.to_owned()).collect()
+    pub fn to_printable(&self) -> impl Iterator<Item = String> + '_ {
+        self.0.keys().map(|key| key.to_owned())
     }
 }
 
