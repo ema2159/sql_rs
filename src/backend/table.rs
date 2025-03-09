@@ -17,9 +17,7 @@ use super::row::Row;
 pub struct Table {
     pub name: String,
     pub columns: Columns,
-    num_rows: usize,
     pager: RefCell<Pager>,
-    root_page_num: u32,
 }
 
 #[derive(Error, Debug)]
@@ -46,8 +44,6 @@ impl Table {
             name: name.to_string(),
             pager,
             columns,
-            root_page_num,
-            num_rows: 0,
         }
     }
 

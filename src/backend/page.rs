@@ -152,11 +152,15 @@ pub enum PageError {
     #[error("Could not insert")]
     InsertError,
     #[error(
+        "The record that is being updated cannot be updated in place. The new payload is of a different size."
+    )]
+    UpdateNotSameSize,
+    #[error("Cannot update record of key {0}. Page doesn't contain a record with a matching key.")]
+    UpdateNotSameKey(u64),
+    #[error(
         "The slice being deserialized does not correspond to a valid page. End of the slice reached during deserialization"
     )]
     EndOfSliceWhileDeserializing,
-    #[error("Cannot insert element. Key already exists.")]
-    DuplicateKey,
     #[error("Cannot get first/last key of empty cell pointer array")]
     CannotGetFirstOrLastKey,
 }
@@ -278,7 +282,7 @@ impl Page {
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn get_next_page_pointer(&self, key: u64) -> Result<u32, PageError> {
-        let partition = self.find_partition(key)?;
+        let (partition, _) = self.find_partition(key)?;
         if partition >= PAGE_SIZE {
             return Ok(self.header.right_pointer);
         }
@@ -289,21 +293,19 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    pub fn find_partition(&self, new_key: u64) -> Result<usize, PageError> {
+    pub fn find_partition(&self, new_key: u64) -> Result<(usize, Option<u64>), PageError> {
         let keys = self.get_keys()?;
         let partition_key = keys.partition_point(|&key| key < new_key);
 
         if partition_key >= keys.len() {
-            return Ok(PAGE_SIZE);
+            return Ok((PAGE_SIZE, None));
         }
 
-        if keys[partition_key] == new_key {
-            return Err(PageError::DuplicateKey);
-        }
+        let curr_key_in_partition = keys[partition_key];
 
         let partition_point = self.cell_pointer_array[partition_key];
 
-        Ok(partition_point as usize)
+        Ok((partition_point as usize, Some(curr_key_in_partition)))
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
@@ -311,11 +313,11 @@ impl Page {
         &mut self,
         cell_ptr_pos: usize,
         key: u64,
-        value: &[u8],
+        payload: &[u8],
         left_child: Option<u32>,
     ) -> Result<(), PageError> {
         // Check if page has enough space
-        let cell_bytes: Rc<[u8]> = DBCell::new(key, value, left_child)
+        let cell_bytes: Rc<[u8]> = DBCell::new(key, payload, left_child)
             .map_err(|_| PageError::InsertError)?
             .try_into()
             .map_err(|_| PageError::InsertError)?;
@@ -351,6 +353,36 @@ impl Page {
             insert_position as u16,
             cell_bytes.len() as u16,
         );
+
+        Ok(())
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
+    pub fn update_same_size(
+        &mut self,
+        cell_ptr_pos: usize,
+        key: u64,
+        payload: &[u8],
+        left_child: Option<u32>,
+    ) -> Result<(), PageError> {
+        let partition_point = cell_ptr_pos;
+        let cell_to_modify: DBCell = self.data[partition_point..]
+            .try_into()
+            .map_err(|_| PageError::CorruptData)?;
+
+        if cell_to_modify.id != key {
+            return Err(PageError::UpdateNotSameKey(key));
+        }
+
+        if cell_to_modify.payload_size != payload.len() as u16 {
+            return Err(PageError::UpdateNotSameSize);
+        }
+
+        let new_payload_bytes: Rc<[u8]> = DBCell::new(key, payload, left_child)
+            .map_err(|_| PageError::InsertError)?
+            .try_into()
+            .map_err(|_| PageError::InsertError)?;
+        let _ = &self.data[partition_point..].copy_from_slice(&new_payload_bytes);
 
         Ok(())
     }

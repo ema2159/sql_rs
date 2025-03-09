@@ -1,34 +1,30 @@
 use std::cell::RefCell;
-use std::fmt;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::rc::Rc;
 
 use ptree::item::StringItem;
-use ptree::{print_tree, write_tree, TreeBuilder};
+use ptree::{print_tree, TreeBuilder};
 use thiserror::Error;
-use tracing::{instrument, trace};
+use tracing::instrument;
 
 use super::cursor::DBCursor;
-use super::db_cell::DBCell;
 use super::page::{Page, PageError, PageType, PAGE_SIZE};
 
 const TABLE_MAX_PAGES: usize = 100;
 
 #[derive(Error, Debug)]
 pub enum PagerError {
-    #[error("Cache miss")]
-    CacheMiss,
-    #[error("Page already exists in pager")]
-    PageExists,
+    #[error("Cannot insert element. Record with the same key already exists.")]
+    DuplicateKey,
     #[error("Page index out of range")]
     PageIdxOutOfRange,
-    #[error("Cannot insert row. Remaining page capacity is smaller than the row size")]
-    PageFull,
     #[error("Could not insert row in page. The following error ocurred during insertion: {0}")]
     PageRowInsertError(#[from] PageError),
     #[error("Trying to access non-existing page")]
     PageNonExistent,
+    #[error("No parent node left in parents stack")]
+    ParentStackEmpty,
     #[error("Table full")]
     TableFull,
 }
@@ -69,10 +65,16 @@ impl Pager {
 
         if let Some(curr_page) = page_option {
             if *curr_page.get_page_type() == PageType::Leaf {
-                let partition = curr_page.find_partition(key)?;
+                let (partition, partition_key_opt) = curr_page.find_partition(key)?;
+                if let Some(partition_key) = partition_key_opt {
+                    if partition_key == key {
+                        return Err(PagerError::DuplicateKey);
+                    }
+                }
                 cursor.cell_ptr_pos = partition;
             } else {
                 let next_page_number = curr_page.get_next_page_pointer(key)?;
+                cursor.parents_stack.push(cursor.page_num);
                 cursor.page_num = next_page_number;
                 self.get_insertion_position(cursor, key)?;
             }
@@ -85,7 +87,7 @@ impl Pager {
         &mut self,
         cursor: &mut DBCursor,
         key: u64,
-        value: &[u8],
+        payload: &[u8],
     ) -> Result<(), PagerError> {
         let page_option = self
             .pages_cache
@@ -93,7 +95,7 @@ impl Pager {
             .ok_or(PagerError::PageIdxOutOfRange)?;
 
         if let Some(mut curr_page) = page_option.take() {
-            match curr_page.insert(cursor.cell_ptr_pos, key, value, None) {
+            match curr_page.insert(cursor.cell_ptr_pos, key, payload, None) {
                 Ok(()) => {
                     self.page_write(curr_page, cursor.page_num as usize);
                     self.print_tree();
@@ -110,8 +112,13 @@ impl Pager {
 
                     // Handle root split
                     if cursor.page_num == self.root_page_num {
-                        self.handle_root_split(curr_page, new_page, new_page_number)?;
+                        self.handle_root_split(curr_page, new_page, new_page_number, cursor)?;
+                    } else {
+                        self.handle_page_split(curr_page, new_page, new_page_number, cursor)?;
                     }
+                    // Retry insert after split from latest common root
+                    self.get_insertion_position(cursor, key)?;
+                    self.insert(cursor, key, payload)?;
 
                     self.print_tree();
                     Ok(())
@@ -123,9 +130,6 @@ impl Pager {
             }
         } else {
             todo!();
-            // Cache miss
-            self.get_page_from_disk(cursor);
-            self.insert(cursor, key, value)
         }
     }
 
@@ -135,10 +139,12 @@ impl Pager {
         old_root: Page,
         new_page: Page,
         new_page_number: u32,
+        cursor: &mut DBCursor,
     ) -> Result<(), PagerError> {
-        // Create a new root and make old root its left child
+        // Create a new root and make old root its right child
         let right_page_number = self.get_unused_page_number();
         let right_page = old_root;
+
         let mut new_root = Page::new(PageType::Interior);
 
         // New page is new root's left page
@@ -146,7 +152,7 @@ impl Pager {
         let left_page_last_key = left_page.get_last_key()?;
         let left_page_number = new_page_number;
 
-        let key_insert_position = new_root.find_partition(left_page_last_key)?;
+        let (key_insert_position, _) = new_root.find_partition(left_page_last_key)?;
         new_root.insert(
             key_insert_position,
             left_page_last_key,
@@ -156,9 +162,65 @@ impl Pager {
 
         new_root.set_right_pointer(right_page_number);
 
+        // Put cursor back in root for insertion retry
+        cursor.page_num = 0;
+
         self.page_write(new_root, self.root_page_num as usize);
         self.page_write(right_page, right_page_number as usize);
         self.page_write(left_page, left_page_number as usize);
+        self.num_pages += 1;
+
+        Ok(())
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
+    fn handle_page_split(
+        &mut self,
+        page_right_split: Page,
+        page_left_split: Page,
+        new_page_number: u32,
+        cursor: &mut DBCursor,
+    ) -> Result<(), PagerError> {
+        let parent_page_num = cursor
+            .parents_stack
+            .pop()
+            .ok_or(PagerError::ParentStackEmpty)?;
+        let split_page_parent_opt = &mut self.pages_cache[parent_page_num as usize];
+        let Some(mut split_page_parent) = split_page_parent_opt.take() else {
+            return Err(PagerError::PageNonExistent);
+        };
+
+        let left_split_last_key = page_left_split.get_last_key()?;
+        let left_split_page_num = cursor.page_num;
+
+        // Put cursor back in parent for insertion retry
+        cursor.page_num = parent_page_num;
+
+        let (key_insert_position, _) = split_page_parent.find_partition(left_split_last_key)?;
+        split_page_parent.insert(
+            key_insert_position,
+            left_split_last_key,
+            &[],
+            Some(left_split_page_num),
+        )?;
+
+        let right_split_last_key = page_right_split.get_last_key()?;
+        let right_split_page_num = new_page_number;
+        let (key_insert_position, _) = split_page_parent.find_partition(right_split_last_key)?;
+        if key_insert_position >= PAGE_SIZE {
+            split_page_parent.set_right_pointer(right_split_page_num);
+        } else {
+            split_page_parent.update_same_size(
+                key_insert_position,
+                right_split_last_key,
+                &[],
+                Some(right_split_page_num),
+            )?;
+        }
+
+        self.page_write(split_page_parent, parent_page_num as usize);
+        self.page_write(page_left_split, left_split_page_num as usize);
+        self.page_write(page_right_split, right_split_page_num as usize);
 
         Ok(())
     }

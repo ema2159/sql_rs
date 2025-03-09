@@ -19,7 +19,7 @@ pub enum CellError {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DBCell {
-    payload_size: u16,
+    pub payload_size: u16,
     pub id: u64,
     pub payload: Box<[u8]>,
     pub left_child: u32,
