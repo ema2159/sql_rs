@@ -55,14 +55,16 @@ impl Table {
         let mut cursor = DBCursor::new(self);
         self.pager
             .borrow()
-            .get_insertion_position(&mut cursor, row_id)
+            .get_leaf_insertion_position(&mut cursor, row_id)
             .map_err(TableError::RowInsertError)?;
 
-        match self.pager.borrow_mut().insert(&mut cursor, row_id, &data) {
+        match self.pager.borrow_mut().insert(&mut cursor, row_id, &data, None) {
             Ok(()) => Ok(()),
             Err(PagerError::TableFull) => Err(TableError::TableFull),
             Err(other_err) => Err(TableError::RowInsertError(other_err)),
-        }
+        }?;
+        self.pager.borrow().print_tree();
+        Ok(())
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]

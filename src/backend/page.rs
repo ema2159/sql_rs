@@ -201,7 +201,7 @@ impl Page {
     }
 
     #[instrument(parent = None, ret, level = "trace")]
-    pub fn new_from_split(mut cell_pointers: CellPtrArray, data: &[u8], shift: usize) -> Self {
+    pub fn new_from_split(mut cell_pointers: CellPtrArray, data: &[u8], shift: usize, page_type: PageType) -> Self {
         let mut new_page_bytes = {
             let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
                 unsafe { MaybeUninit::uninit().assume_init() };
@@ -218,7 +218,7 @@ impl Page {
             .for_each(|ptr| *ptr += shift as u16);
 
         let mut header = PageHeader::default();
-        header.set_page_type(PageType::Leaf, &mut new_page_bytes);
+        header.set_page_type(page_type, &mut new_page_bytes);
         header.set_cells_start(cells_start as u16, &mut new_page_bytes);
 
         let mut new_page = Self {
@@ -398,7 +398,7 @@ impl Page {
 
         // Create a new cell with the left-most records in the current Page, copying the records at
         // the end of the Page, as well as creating a new Cells Pointer Array pointing to them.
-        let new_cell = Self::new_from_split(left_ptr_array, left_cells, right_cells.len());
+        let new_cell = Self::new_from_split(left_ptr_array, left_cells, right_cells.len(), *self.get_page_type());
 
         // Update cell pointer in current Page, leaving the right-most records in it. There is no
         // need to copy or move the actual records, as they are already present in the Page. Also,
