@@ -135,13 +135,15 @@ impl Pager {
                     if key < left_split_last_key {
                         let (partition, _partition_key_opt) =
                             page_left_split.find_partition(key)?;
-                        cursor.page_num = new_page_number;
+                        cursor.page_num = left_split_page_number;
                         cursor.cell_ptr_pos = partition;
                     } else {
                         let (partition, _partition_key_opt) =
                             page_right_split.find_partition(key)?;
                         cursor.cell_ptr_pos = partition;
+                        cursor.page_num = right_split_page_number;
                     };
+
                     self.pages_cache[left_split_page_number as usize] = Some(page_left_split);
                     self.pages_cache[right_split_page_number as usize] = Some(page_right_split);
                     // Record still might be too large so it can retrigger a split
