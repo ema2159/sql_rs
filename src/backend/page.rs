@@ -12,7 +12,7 @@ use super::cursor::DBCursor;
 use super::db_cell::DBCell;
 use super::row::Row;
 
-pub const PAGE_SIZE: usize = 512;
+pub const PAGE_SIZE: usize = 4096;
 const PAGE_HEADER_SIZE: usize = mem::size_of::<PageHeader>();
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
@@ -100,6 +100,16 @@ impl CellPtrArray {
     }
 
     #[instrument(parent = None, skip_all, ret, level = "trace")]
+    fn update_pointer_array_after_delete(
+        &mut self,
+        cell_ptr_array_start: &mut [u8],
+        partition: usize,
+    ) {
+        self.remove(partition);
+        self.write_pointer_array(cell_ptr_array_start);
+    }
+
+    #[instrument(parent = None, skip_all, ret, level = "trace")]
     fn write_pointer_array(&self, cell_ptr_array_start: &mut [u8]) {
         for (idx, elem) in self.iter().enumerate() {
             Self::write_u16_in_bytes(cell_ptr_array_start, idx, *elem);
@@ -147,6 +157,8 @@ pub struct Page {
 pub enum PageError {
     #[error("Cannot process page. The page data is corrupt.")]
     CorruptData,
+    #[error("Trying to delete from empty page.")]
+    DeleteFromEmpty,
     #[error("Cannot insert row. Remaining page capacity is smaller than the row size")]
     PageFull,
     #[error("Could not insert")]
@@ -201,7 +213,12 @@ impl Page {
     }
 
     #[instrument(parent = None, ret, level = "trace")]
-    pub fn new_from_split(mut cell_pointers: CellPtrArray, data: &[u8], shift: usize, page_type: PageType) -> Self {
+    pub fn new_from_split(
+        mut cell_pointers: CellPtrArray,
+        data: &[u8],
+        shift: usize,
+        page_type: PageType,
+    ) -> Self {
         let mut new_page_bytes = {
             let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
                 unsafe { MaybeUninit::uninit().assume_init() };
@@ -293,6 +310,21 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    pub fn move_last_left_child_to_right_pointer(&mut self) -> Result<(), PageError> {
+        if self.cell_pointer_array.len() == 0 {
+            Err(PageError::CannotGetFirstOrLastKey)?
+        }
+        let last_pointer = self.cell_pointer_array[self.cell_pointer_array.len() - 1];
+        let last_cell: DBCell = self.data[last_pointer as usize..]
+            .try_into()
+            .map_err(|_| PageError::CorruptData)?;
+        let last_cell_left_child = last_cell.left_child;
+        self.set_right_pointer(last_cell_left_child);
+        self.delete(self.cell_pointer_array.len() - 1)?;
+        Ok(())
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn find_partition(&self, new_key: u64) -> Result<(usize, Option<u64>), PageError> {
         let keys = self.get_keys()?;
         let partition_key = keys.partition_point(|&key| key < new_key);
@@ -358,6 +390,31 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    pub fn delete(&mut self, cell_ptr_pos: usize) -> Result<(), PageError> {
+        if self.cell_pointer_array.is_empty() {
+            return Err(PageError::DeleteFromEmpty);
+        }
+        if cell_ptr_pos as u16 == self.cell_pointer_array[self.cell_pointer_array.len() - 1] {
+            let new_cells_start = if self.cell_pointer_array.len() <= 2 {
+                PAGE_SIZE as u16
+            } else {
+                self.cell_pointer_array[self.cell_pointer_array.len() - 2]
+            };
+            self.header
+                .set_cells_start(new_cells_start as u16, &mut self.data[..PAGE_HEADER_SIZE]);
+        }
+        self.header.set_num_cells(
+            self.header.num_cells - 1,
+            &mut self.data[..PAGE_HEADER_SIZE],
+        );
+        // Update cell pointer array
+        self.cell_pointer_array
+            .update_pointer_array_after_delete(&mut self.data[PAGE_HEADER_SIZE..], cell_ptr_pos);
+
+        Ok(())
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn update_same_size(
         &mut self,
         cell_ptr_pos: usize,
@@ -388,7 +445,7 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    pub fn split_page(&mut self) -> Self {
+    pub fn split_page(mut self) -> (Self, Self) {
         let (left_ptr_array, right_ptr_array) = self.cell_pointer_array.split_cell_ptr_array();
         let (left_cells, right_cells) = (
             &self.data[left_ptr_array[0] as usize..right_ptr_array[0] as usize],
@@ -398,7 +455,12 @@ impl Page {
 
         // Create a new cell with the left-most records in the current Page, copying the records at
         // the end of the Page, as well as creating a new Cells Pointer Array pointing to them.
-        let new_cell = Self::new_from_split(left_ptr_array, left_cells, right_cells.len(), *self.get_page_type());
+        let new_cell = Self::new_from_split(
+            left_ptr_array,
+            left_cells,
+            right_cells.len(),
+            *self.get_page_type(),
+        );
 
         // Update cell pointer in current Page, leaving the right-most records in it. There is no
         // need to copy or move the actual records, as they are already present in the Page. Also,
@@ -413,7 +475,7 @@ impl Page {
         self.header
             .set_cells_start(right_node_cells_start, &mut self.data[..PAGE_HEADER_SIZE]);
 
-        new_cell
+        (new_cell, self)
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
