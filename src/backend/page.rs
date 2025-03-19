@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{instrument, trace};
 
-use super::cursor::DBCursor;
 use super::db_cell::DBCell;
 use super::row::Row;
 
@@ -27,7 +26,7 @@ struct PageHeader {
 
 impl PageHeader {
     fn set_page_type(&mut self, val: PageType, header_slice: &mut [u8]) {
-        self.page_type = val.clone();
+        self.page_type = val;
         header_slice[0] = val as u8;
     }
 

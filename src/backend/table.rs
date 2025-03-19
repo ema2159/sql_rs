@@ -63,7 +63,6 @@ impl Table {
             Err(PagerError::TableFull) => Err(TableError::TableFull),
             Err(other_err) => Err(TableError::RowInsertError(other_err)),
         }?;
-        self.pager.borrow().print_tree();
         Ok(())
     }
 
