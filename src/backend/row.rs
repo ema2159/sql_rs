@@ -23,6 +23,10 @@ impl fmt::Display for SQLType {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+/// Row
+///
+/// * `rowid`: [TODO:parameter]
+/// * `attributes`: [TODO:parameter]
 pub struct Row {
     rowid: u64,
     attributes: Vec<SQLType>,

@@ -15,6 +15,22 @@ pub const PAGE_SIZE: usize = 4096;
 const PAGE_HEADER_SIZE: usize = mem::size_of::<PageHeader>();
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+/// Struct representing the page's header, with several methods to write to the page's header
+/// fields in the page's byte array.
+///
+/// * `page_type`: One-byte flag at offset 0 indicating the b-tree page type:
+///
+///                - Leaf: 0x0d
+///                - Interior: 0x05
+/// * `first_free_block`: Two-byte integer at offset 1 gives the start of the first freeblock on
+///                       the page, or is zero if there are no freeblocks (UNUSED).
+/// * `num_cells`: Two-byte integer at offset 3 gives the number of cells on the page.
+/// * `cells_start`: Two-byte integer at offset 5 designates the start of the cell content area. A
+///                  zero value for this integer is interpreted as 65536.
+/// * `fragmented_free_bytes`: one-byte integer at offset 7 gives the number of fragmented free
+///                            bytes within the cell content area. (UNUSED)
+/// * `right_pointer`: The four-byte page number at offset 8 is the right-most pointer. This value
+///                    is only used for interior pages.
 struct PageHeader {
     page_type: PageType,
     first_free_block: u16,
@@ -57,6 +73,7 @@ impl PageHeader {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Vec<u16> wrapper struct to read and write from a [`Page`] cell pointer array.
 struct CellPtrArray(Vec<u16>);
 
 impl CellPtrArray {
@@ -146,6 +163,26 @@ impl From<&[u16]> for CellPtrArray {
 }
 
 #[derive(Debug, Clone)]
+/// Implementation of B+tree nodes containing N variable-size database entries.
+/// ``` text
+///      |----------------|
+///      | page header    |   8 bytes for leaves.  12 bytes for interior nodes
+///      |----------------|
+///      | cell pointer   |   |  2 bytes per cell.  Sorted order.
+///      | array          |   |  Grows downward
+///      |                |   v
+///      |----------------|
+///      | unallocated    |
+///      | space          |
+///      |----------------|   ^  Grows upwards
+///      | cell content   |   |  Arbitrary order
+///      | area           |
+///      |----------------|
+/// ```
+///
+/// * `header`: Data structure managing the page's header.
+/// * `data`: Serialized page data as an array of bytes.
+/// * `cell_pointer_array`: Data structure managing the page's cell pointer array.
 pub struct Page {
     header: PageHeader,
     data: [u8; PAGE_SIZE],
