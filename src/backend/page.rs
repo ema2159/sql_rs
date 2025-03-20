@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{instrument, trace};
+use tracing::instrument;
 
 use super::db_cell::DBCell;
 use super::row::Row;
@@ -125,7 +125,7 @@ impl CellPtrArray {
 }
 
 impl DerefMut for CellPtrArray {
-    fn deref_mut<'a>(&'a mut self) -> &'a mut Vec<u16> {
+    fn deref_mut(&mut self) -> &mut Vec<u16> {
         &mut self.0
     }
 }
@@ -133,7 +133,7 @@ impl DerefMut for CellPtrArray {
 impl Deref for CellPtrArray {
     type Target = Vec<u16>;
 
-    fn deref<'a>(&'a self) -> &'a Vec<u16> {
+    fn deref(&self) -> &Vec<u16> {
         &self.0
     }
 }
@@ -197,7 +197,11 @@ impl Page {
             let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
                 unsafe { MaybeUninit::uninit().assume_init() };
 
-            unsafe { mem::transmute::<_, [u8; PAGE_SIZE]>(uninitialized_array) }
+            unsafe {
+                mem::transmute::<[std::mem::MaybeUninit<u8>; 4096], [u8; PAGE_SIZE]>(
+                    uninitialized_array,
+                )
+            }
         };
 
         let mut header = PageHeader::default();
@@ -222,7 +226,11 @@ impl Page {
             let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
                 unsafe { MaybeUninit::uninit().assume_init() };
 
-            unsafe { mem::transmute::<_, [u8; PAGE_SIZE]>(uninitialized_array) }
+            unsafe {
+                mem::transmute::<[std::mem::MaybeUninit<u8>; 4096], [u8; PAGE_SIZE]>(
+                    uninitialized_array,
+                )
+            }
         };
 
         let cells_start = PAGE_SIZE - data.len();
@@ -400,7 +408,7 @@ impl Page {
                 self.cell_pointer_array[self.cell_pointer_array.len() - 2]
             };
             self.header
-                .set_cells_start(new_cells_start as u16, &mut self.data[..PAGE_HEADER_SIZE]);
+                .set_cells_start(new_cells_start, &mut self.data[..PAGE_HEADER_SIZE]);
         }
         self.header.set_num_cells(
             self.header.num_cells - 1,

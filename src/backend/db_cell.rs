@@ -81,7 +81,7 @@ impl TryFrom<&[u8]> for DBCell {
         }
 
         let db_cell =
-            bincode::serde::decode_borrowed_from_slice::<DBCell, _>(&bytes, Self::BINCODE_CONFIG)
+            bincode::serde::decode_borrowed_from_slice::<DBCell, _>(bytes, Self::BINCODE_CONFIG)
                 .map_err(|_| ())?;
         Ok(db_cell)
     }

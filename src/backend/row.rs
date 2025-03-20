@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use core::fmt;
 
 use bincode;
 use serde::{Deserialize, Serialize};
@@ -11,14 +11,14 @@ pub enum SQLType {
     Text(String),
 }
 
-impl ToString for SQLType {
-    // Required method
-    fn to_string(&self) -> String {
-        match self {
+impl fmt::Display for SQLType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let sql_type_str = match self {
             SQLType::UBigInt(num) => num.to_string(),
             SQLType::Integer(num) => num.to_string(),
             SQLType::Text(s) => s.to_owned(),
-        }
+        };
+        write!(f, "{}", sql_type_str)
     }
 }
 
@@ -72,7 +72,7 @@ impl TryFrom<&[u8]> for Row {
         let (rowid, attributes) = bincode::serde::decode_borrowed_from_slice::<
             (u64, Vec<SQLType>),
             _,
-        >(&bytes, Self::BINCODE_CONFIG)
+        >(bytes, Self::BINCODE_CONFIG)
         .map_err(|_| ())?;
         Ok(Self { rowid, attributes })
     }

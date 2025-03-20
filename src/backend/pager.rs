@@ -6,7 +6,7 @@ use std::rc::Rc;
 use ptree::item::StringItem;
 use ptree::{print_tree, TreeBuilder};
 use thiserror::Error;
-use tracing::{instrument, trace};
+use tracing::instrument;
 
 use super::cursor::DBCursor;
 use super::page::{Page, PageError, PageType, PAGE_SIZE};

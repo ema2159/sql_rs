@@ -1,4 +1,4 @@
-use tracing::{instrument, span, trace};
+use tracing::instrument;
 
 use super::vm_error::VMError;
 use crate::backend::columns::Columns;
