@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
+use std::ops::DerefMut;
 use std::rc::Rc;
 
 use ptree::item::StringItem;
@@ -54,7 +55,7 @@ impl Pager {
 
     #[instrument(parent = None, skip(self, cursor),ret, level = "trace")]
     pub fn get_leaf_insertion_position(
-        &self,
+        &mut self,
         cursor: &mut DBCursor,
         key: u64,
     ) -> Result<(), PagerError> {
@@ -78,6 +79,8 @@ impl Pager {
                 cursor.page_num = next_page_number;
                 self.get_leaf_insertion_position(cursor, key)?;
             }
+        } else {
+            self.pages_cache[cursor.page_num as usize] = self.get_page_from_disk(cursor)?;
         }
         Ok(())
     }
@@ -255,8 +258,15 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    fn get_page_from_disk(&self, cursor: &DBCursor) {
-        todo!()
+    fn get_page_from_disk(&mut self, cursor: &DBCursor) -> Result<Option<Page>, PagerError> {
+        let page_num = cursor.page_num as usize;
+        if page_num as usize >= TABLE_MAX_PAGES {
+            return Err(PagerError::PageIdxOutOfRange);
+        }
+
+        let mut file = self.file_ref.borrow_mut();
+        let _ = file.seek(SeekFrom::Start((page_num * PAGE_SIZE) as u64));
+        Ok(Some(Page::new_from_read(file.deref_mut())?))
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]

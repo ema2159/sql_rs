@@ -54,11 +54,15 @@ impl Table {
             TryInto::<Box<[u8]>>::try_into(row).map_err(|_| TableError::RowSerializeError)?;
         let mut cursor = DBCursor::new(self);
         self.pager
-            .borrow()
+            .borrow_mut()
             .get_leaf_insertion_position(&mut cursor, row_id)
             .map_err(TableError::RowInsertError)?;
 
-        match self.pager.borrow_mut().insert(&mut cursor, row_id, &data, None) {
+        match self
+            .pager
+            .borrow_mut()
+            .insert(&mut cursor, row_id, &data, None)
+        {
             Ok(()) => Ok(()),
             Err(PagerError::TableFull) => Err(TableError::TableFull),
             Err(other_err) => Err(TableError::RowInsertError(other_err)),

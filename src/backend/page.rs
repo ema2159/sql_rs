@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use std::fmt;
+use std::io::Read;
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -41,6 +42,17 @@ struct PageHeader {
 }
 
 impl PageHeader {
+    fn read_from_bytes(header_slice: &[u8]) -> Result<Self, PageError> {
+        let mut header = Self::default();
+        header.read_page_type(header_slice)?;
+        header.read_first_free_block(header_slice)?;
+        header.read_num_cells(header_slice)?;
+        header.read_cells_start(header_slice)?;
+        header.read_fragmented_free_bytes(header_slice)?;
+        header.read_right_pointer(header_slice)?;
+        Ok(header)
+    }
+
     fn set_page_type(&mut self, val: PageType, header_slice: &mut [u8]) {
         self.page_type = val;
         header_slice[0] = val as u8;
@@ -70,6 +82,53 @@ impl PageHeader {
         self.right_pointer = val;
         header_slice[8..12].copy_from_slice(&val.to_be_bytes());
     }
+
+    fn read_page_type(&mut self, header_slice: &[u8]) -> Result<(), PageError> {
+        self.page_type = header_slice
+            .get(0)
+            .ok_or(PageError::HeaderReadError)?
+            .try_into()?;
+        Ok(())
+    }
+
+    fn read_first_free_block(&mut self, header_slice: &[u8]) -> Result<(), PageError> {
+        self.first_free_block = u16::from_be_bytes([
+            *header_slice.get(1).ok_or(PageError::HeaderReadError)?,
+            *header_slice.get(2).ok_or(PageError::HeaderReadError)?,
+        ]);
+        Ok(())
+    }
+
+    fn read_num_cells(&mut self, header_slice: &[u8]) -> Result<(), PageError> {
+        self.num_cells = u16::from_be_bytes([
+            *header_slice.get(3).ok_or(PageError::HeaderReadError)?,
+            *header_slice.get(4).ok_or(PageError::HeaderReadError)?,
+        ]);
+        Ok(())
+    }
+
+    fn read_cells_start(&mut self, header_slice: &[u8]) -> Result<(), PageError> {
+        self.cells_start = u16::from_be_bytes([
+            *header_slice.get(5).ok_or(PageError::HeaderReadError)?,
+            *header_slice.get(6).ok_or(PageError::HeaderReadError)?,
+        ]);
+        Ok(())
+    }
+
+    fn read_fragmented_free_bytes(&mut self, header_slice: &[u8]) -> Result<(), PageError> {
+        self.fragmented_free_bytes = *header_slice.get(7).ok_or(PageError::HeaderReadError)?;
+        Ok(())
+    }
+
+    fn read_right_pointer(&mut self, header_slice: &[u8]) -> Result<(), PageError> {
+        self.right_pointer = u32::from_be_bytes([
+            *header_slice.get(8).ok_or(PageError::HeaderReadError)?,
+            *header_slice.get(9).ok_or(PageError::HeaderReadError)?,
+            *header_slice.get(10).ok_or(PageError::HeaderReadError)?,
+            *header_slice.get(11).ok_or(PageError::HeaderReadError)?,
+        ]);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -80,16 +139,18 @@ impl CellPtrArray {
     const PTR_BYTE_SIZE: usize = 2;
 
     #[instrument(parent = None, ret, level = "trace")]
-    fn read_from_bytes(num_cells: usize, cell_ptr_array_start: &[u8]) -> Self {
+    fn read_from_bytes(num_cells: usize, cell_ptr_array_start: &[u8]) -> Result<Self, PageError> {
         let cell_ptr_array_size = num_cells * Self::PTR_BYTE_SIZE;
-        let cell_ptr_array = &cell_ptr_array_start[..cell_ptr_array_size];
+        let cell_ptr_array = &cell_ptr_array_start
+            .get(..cell_ptr_array_size)
+            .ok_or(PageError::CellPtrArrayReadError)?;
 
-        Self(
+        Ok(Self(
             cell_ptr_array
                 .chunks_exact(2)
                 .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
                 .collect(),
-        )
+        ))
     }
 
     #[instrument(parent = None, ret, level = "trace")]
@@ -205,6 +266,14 @@ pub enum PageError {
     UpdateNotSameSize,
     #[error("Cannot update record of key {0}. Page doesn't contain a record with a matching key.")]
     UpdateNotSameKey(u64),
+    #[error("Invalid page type {0:#04x}")]
+    InvalidPageType(u8),
+    #[error("Error while reading page header from reader.")]
+    HeaderReadError,
+    #[error("Error while reading page cell pointer array from reader.")]
+    CellPtrArrayReadError,
+    #[error("Error while getting page bytes from reader: {0}")]
+    ReaderError(String),
     #[error(
         "The slice being deserialized does not correspond to a valid page. End of the slice reached during deserialization"
     )]
@@ -221,25 +290,39 @@ pub enum PageType {
     Interior = 0x05,
 }
 
+impl TryFrom<&u8> for PageType {
+    type Error = PageError;
+
+    fn try_from(value: &u8) -> Result<Self, PageError> {
+        match value {
+            0x0d => Ok(PageType::Leaf),
+            0x05 => Ok(PageType::Interior),
+            _ => Err(PageError::InvalidPageType(*value)),
+        }
+    }
+}
+
 impl Page {
     const BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
     const CELL_PTR_BYTE_SIZE: usize = 2;
 
-    #[instrument(parent = None, level = "trace")]
-    pub fn new(page_type: PageType) -> Self {
+    fn create_uninit_page_bytes() -> [u8; PAGE_SIZE] {
         /* For performance reasons, a page is initialized as an empty array.
         It is the responsibility of the implementation to read and write the data properly.
         */
-        let mut uninitialized_array = {
-            let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
-                unsafe { MaybeUninit::uninit().assume_init() };
+        let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
+            unsafe { MaybeUninit::uninit().assume_init() };
 
-            unsafe {
-                mem::transmute::<[std::mem::MaybeUninit<u8>; 4096], [u8; PAGE_SIZE]>(
-                    uninitialized_array,
-                )
-            }
-        };
+        unsafe {
+            mem::transmute::<[std::mem::MaybeUninit<u8>; 4096], [u8; PAGE_SIZE]>(
+                uninitialized_array,
+            )
+        }
+    }
+
+    #[instrument(parent = None, level = "trace")]
+    pub fn new(page_type: PageType) -> Self {
+        let mut uninitialized_array = Self::create_uninit_page_bytes();
 
         let mut header = PageHeader::default();
         header.set_page_type(page_type, &mut uninitialized_array);
@@ -252,6 +335,28 @@ impl Page {
         }
     }
 
+    #[instrument(parent = None, level = "trace")]
+    pub fn new_from_read<T>(read: &mut T) -> Result<Self, PageError>
+    where
+        T: Read + std::fmt::Debug,
+    {
+        let mut page_bytes = Self::create_uninit_page_bytes();
+        read.read_exact(&mut page_bytes)
+            .map_err(|err| PageError::ReaderError(err.to_string()))?;
+
+        let header = PageHeader::read_from_bytes(&page_bytes[..PAGE_HEADER_SIZE])?;
+        let cell_pointer_array = CellPtrArray::read_from_bytes(
+            header.num_cells.into(),
+            &page_bytes[PAGE_HEADER_SIZE..],
+        )?;
+
+        Ok(Self {
+            header,
+            data: page_bytes,
+            cell_pointer_array,
+        })
+    }
+
     #[instrument(parent = None, ret, level = "trace")]
     pub fn new_from_split(
         mut cell_pointers: CellPtrArray,
@@ -259,16 +364,7 @@ impl Page {
         shift: usize,
         page_type: PageType,
     ) -> Self {
-        let mut new_page_bytes = {
-            let uninitialized_array: [MaybeUninit<u8>; PAGE_SIZE] =
-                unsafe { MaybeUninit::uninit().assume_init() };
-
-            unsafe {
-                mem::transmute::<[std::mem::MaybeUninit<u8>; 4096], [u8; PAGE_SIZE]>(
-                    uninitialized_array,
-                )
-            }
-        };
+        let mut new_page_bytes = Self::create_uninit_page_bytes();
 
         let cells_start = PAGE_SIZE - data.len();
         new_page_bytes[cells_start..].copy_from_slice(data);
