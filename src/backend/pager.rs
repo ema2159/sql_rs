@@ -59,23 +59,21 @@ impl Pager {
         cursor: &mut DBCursor,
         key: u64,
     ) -> Result<(), PagerError> {
-        let page_option = self.retrieve_page(cursor)?;
+        let curr_page = self.retrieve_page(cursor.page_num)?;
 
-        if let Some(curr_page) = page_option {
-            if *curr_page.get_page_type() == PageType::Leaf {
-                let (partition, partition_key_opt) = curr_page.find_partition(key)?;
-                if let Some(partition_key) = partition_key_opt {
-                    if partition_key == key {
-                        return Err(PagerError::DuplicateKey);
-                    }
+        if *curr_page.get_page_type() == PageType::Leaf {
+            let (partition, partition_key_opt) = curr_page.find_partition(key)?;
+            if let Some(partition_key) = partition_key_opt {
+                if partition_key == key {
+                    return Err(PagerError::DuplicateKey);
                 }
-                cursor.cell_ptr_pos = partition;
-            } else {
-                let next_page_number = curr_page.get_next_page_pointer(key)?;
-                cursor.parents_stack.push(cursor.page_num);
-                cursor.page_num = next_page_number;
-                self.get_leaf_insertion_position(cursor, key)?;
             }
+            cursor.cell_ptr_pos = partition;
+        } else {
+            let next_page_number = curr_page.get_next_page_pointer(key)?;
+            cursor.parents_stack.push(cursor.page_num);
+            cursor.page_num = next_page_number;
+            self.get_leaf_insertion_position(cursor, key)?;
         }
         Ok(())
     }
@@ -234,6 +232,7 @@ impl Pager {
         // might trigger splits further up in the tree.
         self.pages_cache[parent_page_num as usize] = Some(split_page_parent); // Page was taken
                                                                               // before, needs to
+                                                                              // be put back
         cursor.page_num = parent_page_num;
         self.insert(
             cursor,
@@ -241,8 +240,6 @@ impl Pager {
             &[],
             Some(left_split_page_number),
         )?;
-        // Return cursor to its original position
-        cursor.page_num = right_split_page_number;
 
         Ok((left_split_page_number, right_split_page_number))
     }
@@ -253,31 +250,45 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    fn get_page_from_disk(&mut self, cursor: &DBCursor) -> Result<Option<Page>, PagerError> {
-        let page_num = cursor.page_num as usize;
+    fn get_page_from_disk(&self, page_num: u32) -> Result<Page, PagerError> {
+        let page_num = page_num as usize;
         if page_num >= TABLE_MAX_PAGES {
             return Err(PagerError::PageIdxOutOfRange);
         }
 
         let mut file = self.file_ref.borrow_mut();
         let _ = file.seek(SeekFrom::Start((page_num * PAGE_SIZE) as u64));
-        Ok(Some(Page::new_from_read(file.deref_mut())?))
+        Ok(Page::new_from_read(file.deref_mut())?)
     }
 
-    fn retrieve_page(&mut self, cursor: &DBCursor) -> Result<Option<&mut Page>, PagerError> {
-        if !self.page_exists(cursor.page_num) {
+    fn retrieve_page(&mut self, page_num: u32) -> Result<&mut Page, PagerError> {
+        if !self.page_exists(page_num) {
             return Err(PagerError::PageNonExistent);
         }
-        let page_option = self
+
+        // First, check if we need to load from disk
+        let page_from_disk = if self
             .pages_cache
-            .get(cursor.page_num as usize)
+            .get(page_num as usize)
+            .is_some_and(|p| p.is_none())
+        {
+            Some(self.get_page_from_disk(page_num)?)
+        } else {
+            None
+        };
+
+        // Now, we safely get a mutable reference since the immutable borrow is done
+        let page_slot = self
+            .pages_cache
+            .get_mut(page_num as usize)
             .ok_or(PagerError::PageIdxOutOfRange)?;
 
-        if page_option.is_none() {
-            let page_from_disk = self.get_page_from_disk(cursor)?;
-            self.pages_cache[cursor.page_num as usize] = page_from_disk;
+        // Insert the page if necessary
+        if let Some(page) = page_from_disk {
+            *page_slot = Some(page);
         }
-        Ok(self.pages_cache[cursor.page_num as usize].as_mut())
+
+        page_slot.as_mut().ok_or(PagerError::PageIdxOutOfRange)
     }
 
     fn page_exists(&mut self, page_num: u32) -> bool {
