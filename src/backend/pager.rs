@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::rc::Rc;
 
@@ -18,6 +18,8 @@ const TABLE_MAX_PAGES: usize = 100;
 pub enum PagerError {
     #[error("Cannot insert element. Record with the same key already exists.")]
     DuplicateKey,
+    #[error("I/O error: {0}")]
+    Io(io::Error),
     #[error("Page index out of range")]
     PageIdxOutOfRange,
     #[error("Could not insert row in page. The following error ocurred during insertion: {0}")]
@@ -94,7 +96,7 @@ impl Pager {
         if let Some(mut curr_page) = page_option.take() {
             match curr_page.insert(cursor.cell_ptr_pos, key, payload, left_child) {
                 Ok(()) => {
-                    self.page_write(curr_page, cursor.page_num as usize);
+                    self.page_write(curr_page, cursor.page_num as usize)?;
                 }
                 Err(PageError::PageFull) => {
                     if self.num_pages as usize >= TABLE_MAX_PAGES {
@@ -144,8 +146,8 @@ impl Pager {
                     self.pages_cache[right_split_page_number as usize] = Some(page_right_split);
                     // Record still might be too large so it can retrigger a split
                     let _ = self.insert(cursor, key, payload, left_child);
-                    self.flush_page(left_split_page_number as usize);
-                    self.flush_page(right_split_page_number as usize);
+                    self.flush_page(left_split_page_number as usize)?;
+                    self.flush_page(right_split_page_number as usize)?;
                 }
                 Err(err) => {
                     self.pages_cache[cursor.page_num as usize] = Some(curr_page);
@@ -183,7 +185,7 @@ impl Pager {
 
         cursor.page_num = left_split_page_number;
 
-        self.page_write(new_root, self.root_page_num as usize);
+        self.page_write(new_root, self.root_page_num as usize)?;
         self.num_pages += 1;
 
         Ok((left_split_page_number, right_split_page_number))
@@ -296,9 +298,10 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    fn page_write(&mut self, page: Page, page_idx: usize) {
+    fn page_write(&mut self, page: Page, page_idx: usize) -> Result<(), PagerError> {
         self.pages_cache[page_idx] = Some(page);
-        self.flush_page(page_idx);
+        self.flush_page(page_idx)?;
+        Ok(())
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
@@ -308,10 +311,11 @@ impl Pager {
         }
 
         let mut file = self.file_ref.borrow_mut();
-        let _ = file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64));
+        file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64))
+            .map_err(PagerError::Io)?;
         let page_to_write = self.pages_cache[page_idx].as_ref().unwrap().clone();
         let bytes: [u8; PAGE_SIZE] = page_to_write.into();
-        let _ = file.write_all(&bytes);
+        file.write_all(&bytes).map_err(PagerError::Io)?;
         Ok(())
     }
 
@@ -367,8 +371,9 @@ impl Pager {
         Ok(tree_builder.build())
     }
 
-    pub fn print_tree(&mut self) {
+    pub fn print_tree(&mut self) -> Result<(), PagerError> {
         let tree = self.create_tree().unwrap();
-        print_tree(&tree);
+        print_tree(&tree).map_err(PagerError::Io)?;
+        Ok(())
     }
 }
