@@ -223,7 +223,6 @@ impl From<&[u16]> for CellPtrArray {
     }
 }
 
-#[derive(Debug, Clone)]
 /// Implementation of B+tree nodes containing N variable-size database entries.
 /// ``` text
 ///      |----------------|
@@ -244,6 +243,7 @@ impl From<&[u16]> for CellPtrArray {
 /// * `header`: Data structure managing the page's header.
 /// * `data`: Serialized page data as an array of bytes.
 /// * `cell_pointer_array`: Data structure managing the page's cell pointer array.
+#[derive(Debug, Clone)]
 pub struct Page {
     header: PageHeader,
     data: [u8; PAGE_SIZE],

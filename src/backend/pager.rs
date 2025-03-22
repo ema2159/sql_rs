@@ -59,10 +59,7 @@ impl Pager {
         cursor: &mut DBCursor,
         key: u64,
     ) -> Result<(), PagerError> {
-        let page_option = self
-            .pages_cache
-            .get(cursor.page_num as usize)
-            .ok_or(PagerError::PageIdxOutOfRange)?;
+        let page_option = self.retrieve_page(cursor)?;
 
         if let Some(curr_page) = page_option {
             if *curr_page.get_page_type() == PageType::Leaf {
@@ -79,8 +76,6 @@ impl Pager {
                 cursor.page_num = next_page_number;
                 self.get_leaf_insertion_position(cursor, key)?;
             }
-        } else {
-            self.pages_cache[cursor.page_num as usize] = self.get_page_from_disk(cursor)?;
         }
         Ok(())
     }
@@ -260,13 +255,33 @@ impl Pager {
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     fn get_page_from_disk(&mut self, cursor: &DBCursor) -> Result<Option<Page>, PagerError> {
         let page_num = cursor.page_num as usize;
-        if page_num as usize >= TABLE_MAX_PAGES {
+        if page_num >= TABLE_MAX_PAGES {
             return Err(PagerError::PageIdxOutOfRange);
         }
 
         let mut file = self.file_ref.borrow_mut();
         let _ = file.seek(SeekFrom::Start((page_num * PAGE_SIZE) as u64));
         Ok(Some(Page::new_from_read(file.deref_mut())?))
+    }
+
+    fn retrieve_page(&mut self, cursor: &DBCursor) -> Result<Option<&mut Page>, PagerError> {
+        if !self.page_exists(cursor.page_num) {
+            return Err(PagerError::PageNonExistent);
+        }
+        let page_option = self
+            .pages_cache
+            .get(cursor.page_num as usize)
+            .ok_or(PagerError::PageIdxOutOfRange)?;
+
+        if page_option.is_none() {
+            let page_from_disk = self.get_page_from_disk(cursor)?;
+            self.pages_cache[cursor.page_num as usize] = page_from_disk;
+        }
+        Ok(self.pages_cache[cursor.page_num as usize].as_mut())
+    }
+
+    fn page_exists(&mut self, page_num: u32) -> bool {
+        page_num < self.num_pages
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
@@ -311,6 +326,14 @@ impl Pager {
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn pages(&self) -> impl Iterator<Item = &Option<Page>> {
+        self.pages_cache.iter()
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
+    pub fn leaf_pages(&self) -> impl Iterator<Item = &Option<Page>> {
+        fn get_page_children(page: &Page) -> impl Iterator<Item = Result<u32, PageError>> + '_ {
+            page.children_iter()
+        }
         self.pages_cache.iter()
     }
 
