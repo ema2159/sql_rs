@@ -348,21 +348,15 @@ impl Pager {
         self.pages_cache.iter()
     }
 
-    fn create_tree(&self) -> Result<StringItem, PagerError> {
-        #[instrument(parent = None, skip(pager, tree_builder), ret, level = "trace")]
+    fn create_tree(&mut self) -> Result<StringItem, PagerError> {
         fn add_page_recursively(
-            pager: &Pager,
+            pager: &mut Pager,
             tree_builder: &mut TreeBuilder,
             page_num: u32,
         ) -> Result<(), PagerError> {
-            let page_opt = pager
-                .pages_cache
-                .get(page_num as usize)
-                .ok_or(PagerError::PageIdxOutOfRange)?
-                .as_ref();
-            let page = page_opt.ok_or(PagerError::PageNonExistent)?;
+            let page: &_ = pager.retrieve_page(page_num)?;
             tree_builder.begin_child(format!("{}{}", page_num, page));
-            for child_num in page.children_iter() {
+            for child_num in page.children_iter().collect::<Vec<_>>() {
                 add_page_recursively(pager, tree_builder, child_num?)?
             }
             tree_builder.end_child();
@@ -373,7 +367,7 @@ impl Pager {
         Ok(tree_builder.build())
     }
 
-    pub fn print_tree(&self) {
+    pub fn print_tree(&mut self) {
         let tree = self.create_tree().unwrap();
         print_tree(&tree);
     }
