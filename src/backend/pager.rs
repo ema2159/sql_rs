@@ -56,6 +56,12 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self, cursor),ret, level = "trace")]
+    /// Return a DB cursor pointing to the point in which the record would be inserted in the
+    /// respective leaf node. Recursively traverses the nodes from the root, loading the pages from
+    /// disk if they are not present in the cache.
+    ///
+    /// * `cursor`: DB cursor. Passed by value and returned by the function
+    /// * `key`: Key of the record to insert
     pub fn get_leaf_insertion_position<'a>(
         &mut self,
         mut cursor: DBCursor<'a>,
@@ -82,6 +88,13 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Insert record into insertion position specified by the cursor
+    ///
+    /// * `cursor`: DB cursor containing pointing to the exact position in which the record shall
+    /// be inserted in the page
+    /// * `key`: Key of the record to insert
+    /// * `payload`: Payload of the record to insert
+    /// * `left_child`: Left child of the record to insert (for interior pages)
     pub fn insert(
         &mut self,
         cursor: &mut DBCursor,
@@ -159,6 +172,30 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Called after a root node split. It creates a new root with a single record with the
+    /// largest key of the left split of the old root which points to it, and a right pointer
+    /// pointing to the right split of the old root.
+    /// Pre:
+    /// ```text
+    ///
+    ///         ┌─────────────┌┐
+    ///         │ 0 1 2 3 4 5 ││
+    ///         └─────────────└┘
+    /// ```
+    /// Post:
+    /// ``` text
+    ///              ┌───┌┐
+    ///              │ 2 ││─────┐
+    ///              └─┬─└┘     │
+    /// ┌──────────────┘        │
+    /// │  ┌───────┌┐       ┌───▼───┌┐
+    /// └─►│ 0 1 2 ││       │ 3 4 5 ││
+    ///    └───────└┘       └───────└┘
+    /// ```
+    /// * `page_left_split`: Old root split containing the lowest records.
+    /// * `page_right_split`: Old root split containing the highest records.
+    /// * `new_page_number`: New page number assigned to one of the splits. Other split reuses
+    /// existing number.
     fn handle_root_split(
         &mut self,
         page_left_split: &Page,
@@ -189,6 +226,37 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Called after a node split. It modifies the parent of the former node, modifying in place
+    /// the existing record (or right page pointer) that pointed to it to point to its right split,
+    /// and then tries to add a new record pointing to the left split. This action might
+    /// recursively trigger a split in the former record parend and all subsequent nodes up the
+    /// tree.
+    /// Pre:
+    /// ``` text
+    ///            ┌───────┌┐
+    ///            │ 0 3 9 ││
+    ///            └─────┬─└┘
+    ///              ┌───┘
+    ///       ┌──────▼──────┌┐
+    ///       │ 4 5 6 7 8 9 ││
+    ///       └─────────────└┘
+    /// ```
+    /// Post:
+    /// ``` text
+    ///         ┌─────────┌┐
+    ///         │ 0 3 6 9 ││
+    ///         └─────┬─┬─└┘
+    ///               │ │
+    ///     ┌─────────┘ └─────┐
+    /// ┌───▼───┌┐        ┌───▼───┌┐
+    /// │ 4 5 6 ││        │ 7 8 9 ││
+    /// └───────└┘        └───────└┘
+    /// ```
+    /// * `page_left_split`: Page split containing the lowest records.
+    /// * `page_right_split`:  Page split containing the highest records.
+    /// * `new_page_number`: New page number assigned to one of the splits. Other split reuses
+    /// existing number.
+    /// * `cursor`: Reference to DB cursor with pre-split page num and parents stack
     fn handle_page_split(
         &mut self,
         page_left_split: &Page,
