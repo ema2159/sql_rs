@@ -34,7 +34,7 @@ pub enum PagerError {
 
 #[derive(Debug)]
 pub struct Pager {
-    num_pages: u32,
+    num_pages: u32, // TODO: Needs to be a reference to a database element, not a per-table item
     pages_cache: [Option<Page>; TABLE_MAX_PAGES],
     root_page_num: u32,
     file_ref: Rc<RefCell<File>>,
@@ -56,14 +56,14 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self, cursor),ret, level = "trace")]
-    pub fn get_leaf_insertion_position(
+    pub fn get_leaf_insertion_position<'a>(
         &mut self,
-        cursor: &mut DBCursor,
+        mut cursor: DBCursor<'a>,
         key: u64,
-    ) -> Result<(), PagerError> {
+    ) -> Result<DBCursor<'a>, PagerError> {
         let curr_page = self.retrieve_page(cursor.page_num)?;
 
-        if *curr_page.get_page_type() == PageType::Leaf {
+        let cursor = if *curr_page.get_page_type() == PageType::Leaf {
             let (partition, partition_key_opt) = curr_page.find_partition(key)?;
             if let Some(partition_key) = partition_key_opt {
                 if partition_key == key {
@@ -71,13 +71,14 @@ impl Pager {
                 }
             }
             cursor.cell_ptr_pos = partition;
+            cursor
         } else {
             let next_page_number = curr_page.get_next_page_pointer(key)?;
             cursor.parents_stack.push(cursor.page_num);
             cursor.page_num = next_page_number;
-            self.get_leaf_insertion_position(cursor, key)?;
-        }
-        Ok(())
+            self.get_leaf_insertion_position(cursor, key)?
+        };
+        Ok(cursor)
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
@@ -145,7 +146,7 @@ impl Pager {
                     self.pages_cache[left_split_page_number as usize] = Some(page_left_split);
                     self.pages_cache[right_split_page_number as usize] = Some(page_right_split);
                     // Record still might be too large so it can retrigger a split
-                    let _ = self.insert(cursor, key, payload, left_child);
+                    self.insert(cursor, key, payload, left_child)?;
                     self.flush_page(left_split_page_number as usize)?;
                     self.flush_page(right_split_page_number as usize)?;
                 }
@@ -254,12 +255,8 @@ impl Pager {
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     fn get_page_from_disk(&self, page_num: u32) -> Result<Page, PagerError> {
         let page_num = page_num as usize;
-        if page_num >= TABLE_MAX_PAGES {
-            return Err(PagerError::PageIdxOutOfRange);
-        }
-
         let mut file = self.file_ref.borrow_mut();
-        let _ = file.seek(SeekFrom::Start((page_num * PAGE_SIZE) as u64));
+        file.seek(SeekFrom::Start((page_num * PAGE_SIZE) as u64))?;
         Ok(Page::new_from_read(file.deref_mut())?)
     }
 
@@ -306,10 +303,6 @@ impl Pager {
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn flush_page(&mut self, page_idx: usize) -> Result<(), PagerError> {
-        if page_idx >= TABLE_MAX_PAGES {
-            return Err(PagerError::PageIdxOutOfRange);
-        }
-
         let mut file = self.file_ref.borrow_mut();
         file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64))?;
         let page_to_write = self.pages_cache[page_idx].as_ref().unwrap().clone();

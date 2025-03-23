@@ -52,10 +52,10 @@ impl Table {
         let row_id = row.rowid();
         let data =
             TryInto::<Box<[u8]>>::try_into(row).map_err(|_| TableError::RowSerializeError)?;
-        let mut cursor = DBCursor::new(self);
-        self.pager
+        let mut cursor = self
+            .pager
             .borrow_mut()
-            .get_leaf_insertion_position(&mut cursor, row_id)
+            .get_leaf_insertion_position(DBCursor::new(self), row_id)
             .map_err(TableError::RowInsertError)?;
 
         match self
