@@ -115,7 +115,6 @@ impl Pager {
                                 &page_left_split,
                                 &page_right_split,
                                 new_page_number,
-                                cursor,
                             )?
                         } else {
                             self.handle_page_split(
@@ -165,7 +164,6 @@ impl Pager {
         page_left_split: &Page,
         page_right_split: &Page,
         new_page_number: u32,
-        cursor: &mut DBCursor,
     ) -> Result<(u32, u32), PagerError> {
         let left_split_page_number = new_page_number;
         let right_split_page_number = self.get_unused_page_number();
@@ -183,8 +181,6 @@ impl Pager {
         )?;
 
         new_root.set_right_pointer(right_split_page_number);
-
-        cursor.page_num = left_split_page_number;
 
         self.page_write(new_root, self.root_page_num as usize)?;
         self.num_pages += 1;
