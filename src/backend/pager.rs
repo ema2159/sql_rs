@@ -16,8 +16,6 @@ const TABLE_MAX_PAGES: usize = 100;
 
 #[derive(Error, Debug)]
 pub enum PagerError {
-    #[error("Cannot insert element. Record with the same key already exists.")]
-    DuplicateKey,
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
     #[error("Page index out of range")]
@@ -56,12 +54,12 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self, cursor),ret, level = "trace")]
-    /// Return a DB cursor pointing to the point in which the record would be inserted in the
-    /// respective leaf node. Recursively traverses the nodes from the root, loading the pages from
-    /// disk if they are not present in the cache.
+    /// Return a DB cursor pointing to the leaf node in which the record would be inserted.
+    /// Recursively traverses the nodes from the root, loading the pages from disk if they are not
+    /// present in the cache.
     ///
-    /// * `cursor`: DB cursor. Passed by value and returned by the function
-    /// * `key`: Key of the record to insert
+    /// * `cursor`: DB cursor. Passed by value and returned by the function * `key`: Key of the
+    /// record to insert
     pub fn get_leaf_insertion_position<'a>(
         &mut self,
         mut cursor: DBCursor<'a>,
@@ -70,13 +68,6 @@ impl Pager {
         let curr_page = self.retrieve_page(cursor.page_num)?;
 
         let cursor = if *curr_page.get_page_type() == PageType::Leaf {
-            let (partition, partition_key_opt) = curr_page.find_partition(key)?;
-            if let Some(partition_key) = partition_key_opt {
-                if partition_key == key {
-                    return Err(PagerError::DuplicateKey);
-                }
-            }
-            cursor.cell_ptr_pos = partition;
             cursor
         } else {
             let next_page_number = curr_page.get_next_page_pointer(key)?;
@@ -108,7 +99,7 @@ impl Pager {
             .ok_or(PagerError::PageIdxOutOfRange)?;
 
         if let Some(mut curr_page) = page_option.take() {
-            match curr_page.insert(cursor.cell_ptr_pos, key, payload, left_child) {
+            match curr_page.insert(key, payload, left_child) {
                 Ok(()) => {
                     self.page_write(curr_page, cursor.page_num as usize)?;
                 }
@@ -144,14 +135,8 @@ impl Pager {
 
                     // Retry insert after split
                     if key < left_split_last_key {
-                        let (partition, _partition_key_opt) =
-                            page_left_split.find_partition(key)?;
                         cursor.page_num = left_split_page_number;
-                        cursor.cell_ptr_pos = partition;
                     } else {
-                        let (partition, _partition_key_opt) =
-                            page_right_split.find_partition(key)?;
-                        cursor.cell_ptr_pos = partition;
                         cursor.page_num = right_split_page_number;
                     };
 
@@ -209,13 +194,7 @@ impl Pager {
 
         let left_split_last_key = page_left_split.get_last_key()?;
 
-        let (key_insert_position, _) = new_root.find_partition(left_split_last_key)?;
-        new_root.insert(
-            key_insert_position,
-            left_split_last_key,
-            &[],
-            Some(left_split_page_number),
-        )?;
+        new_root.insert(left_split_last_key, &[], Some(left_split_page_number))?;
 
         new_root.set_right_pointer(right_split_page_number);
 
@@ -282,8 +261,9 @@ impl Pager {
         // First modify parent page record to point to the right half of the page after the split
         let left_split_last_key = page_left_split.get_last_key()?;
         let left_split_page_number = cursor.page_num;
-        let (key_insert_position, _) = split_page_parent.find_partition(right_split_last_key)?;
-        if key_insert_position >= PAGE_SIZE {
+        let (key_insert_position, curr_key_in_partition) = split_page_parent.find_partition(right_split_last_key)?;
+        // TODO: Create a should insert in right pointer method
+        if curr_key_in_partition.is_none() {
             split_page_parent.set_right_pointer(right_split_page_number);
         } else {
             split_page_parent.update_same_size(

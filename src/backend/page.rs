@@ -132,7 +132,7 @@ impl PageHeader {
 }
 
 #[derive(Debug, Clone, Default)]
-/// Vec<u16> wrapper struct to read and write from a [`Page`] cell pointer array.
+/// `Vec<u16>` wrapper struct to read and write from a [`Page`] cell pointer array.
 struct CellPtrArray(Vec<u16>);
 
 impl CellPtrArray {
@@ -161,18 +161,14 @@ impl CellPtrArray {
         (left.into(), right.into())
     }
 
-    #[instrument(parent = None, skip_all, ret, level = "trace")]
+    #[instrument(parent = None, ret, level = "trace")]
     fn update_pointer_array_after_insert(
         &mut self,
         cell_ptr_array_start: &mut [u8],
         new_cell_ptr: u16,
-        new_cell_byte_size: u16,
+        partition: usize,
     ) {
-        let insert_pos = self.partition_point(|&cell_ptr| cell_ptr <= new_cell_ptr);
-        self.insert(insert_pos, new_cell_ptr);
-        for elem in self[..insert_pos].iter_mut() {
-            *elem -= new_cell_byte_size;
-        }
+        self.insert(partition, new_cell_ptr);
         self.write_pointer_array(cell_ptr_array_start);
     }
 
@@ -256,6 +252,8 @@ pub enum PageError {
     CorruptData,
     #[error("Trying to delete from empty page.")]
     DeleteFromEmpty,
+    #[error("Cannot insert record with key {0}. Record with the same key already exists.")]
+    DuplicateKey(u64),
     #[error("Cannot insert row. Remaining page capacity is smaller than the row size")]
     PageFull,
     #[error("Could not insert")]
@@ -314,7 +312,7 @@ impl Page {
             unsafe { MaybeUninit::uninit().assume_init() };
 
         unsafe {
-            mem::transmute::<[std::mem::MaybeUninit<u8>; 4096], [u8; PAGE_SIZE]>(
+            mem::transmute::<[std::mem::MaybeUninit<u8>; PAGE_SIZE], [u8; PAGE_SIZE]>(
                 uninitialized_array,
             )
         }
@@ -470,51 +468,49 @@ impl Page {
         let partition_key = keys.partition_point(|&key| key < new_key);
 
         if partition_key >= keys.len() {
-            return Ok((PAGE_SIZE, None));
+            return Ok((keys.len(), None));
         }
 
         let curr_key_in_partition = keys[partition_key];
 
-        let partition_point = self.cell_pointer_array[partition_key];
-
-        Ok((partition_point as usize, Some(curr_key_in_partition)))
+        Ok((partition_key, Some(curr_key_in_partition)))
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn insert(
         &mut self,
-        cell_ptr_pos: usize,
         key: u64,
         payload: &[u8],
         left_child: Option<u32>,
     ) -> Result<(), PageError> {
+        let (partition, partition_key_opt) = self.find_partition(key)?;
+        if let Some(partition_key) = partition_key_opt {
+            if partition_key == key {
+                return Err(PageError::DuplicateKey(key));
+            }
+        }
         // Check if page has enough space
         let cell_bytes: Rc<[u8]> = DBCell::new(key, payload, left_child)
             .map_err(|_| PageError::InsertError)?
             .try_into()
             .map_err(|_| PageError::InsertError)?;
         let old_cells_start = self.header.cells_start as usize;
-        let new_cells_start = old_cells_start - cell_bytes.len();
+        let insert_position = old_cells_start - cell_bytes.len();
         let end_of_ptr_array_after_insert =
             PAGE_HEADER_SIZE + ((self.header.num_cells as usize) + 1) * Self::CELL_PTR_BYTE_SIZE;
 
-        if new_cells_start <= end_of_ptr_array_after_insert {
+        if insert_position <= end_of_ptr_array_after_insert {
             self.header
                 .set_cells_start(0, &mut self.data[..PAGE_HEADER_SIZE]);
             Err(PageError::PageFull)?
         }
 
         // ------------------ Insert data into slot ------------------
-        let partition_point = cell_ptr_pos;
-        let insert_position = partition_point - cell_bytes.len();
-        // Make room for cell content area
-        let _ = &self.data[new_cells_start..partition_point].rotate_left(cell_bytes.len());
-        // Insert cell in slot
-        let _ = &self.data[insert_position..partition_point].copy_from_slice(&cell_bytes);
+        self.data[insert_position..old_cells_start].copy_from_slice(&cell_bytes);
 
         // Update header
         self.header
-            .set_cells_start(new_cells_start as u16, &mut self.data[..PAGE_HEADER_SIZE]);
+            .set_cells_start(insert_position as u16, &mut self.data[..PAGE_HEADER_SIZE]);
         self.header.set_num_cells(
             self.header.num_cells + 1,
             &mut self.data[..PAGE_HEADER_SIZE],
@@ -523,7 +519,7 @@ impl Page {
         self.cell_pointer_array.update_pointer_array_after_insert(
             &mut self.data[PAGE_HEADER_SIZE..],
             insert_position as u16,
-            cell_bytes.len() as u16,
+            partition,
         );
 
         Ok(())
@@ -557,12 +553,12 @@ impl Page {
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn update_same_size(
         &mut self,
-        cell_ptr_pos: usize,
+        key_index: usize,
         key: u64,
         payload: &[u8],
         left_child: Option<u32>,
     ) -> Result<(), PageError> {
-        let partition_point = cell_ptr_pos;
+        let partition_point = self.cell_pointer_array[key_index] as usize;
         let cell_to_modify: DBCell = self.data[partition_point..]
             .try_into()
             .map_err(|_| PageError::CorruptData)?;
