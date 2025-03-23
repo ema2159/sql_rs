@@ -19,7 +19,7 @@ pub enum PagerError {
     #[error("Cannot insert element. Record with the same key already exists.")]
     DuplicateKey,
     #[error("I/O error: {0}")]
-    Io(io::Error),
+    Io(#[from] io::Error),
     #[error("Page index out of range")]
     PageIdxOutOfRange,
     #[error("Could not insert row in page. The following error ocurred during insertion: {0}")]
@@ -311,11 +311,10 @@ impl Pager {
         }
 
         let mut file = self.file_ref.borrow_mut();
-        file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64))
-            .map_err(PagerError::Io)?;
+        file.seek(SeekFrom::Start((page_idx * PAGE_SIZE) as u64))?;
         let page_to_write = self.pages_cache[page_idx].as_ref().unwrap().clone();
         let bytes: [u8; PAGE_SIZE] = page_to_write.into();
-        file.write_all(&bytes).map_err(PagerError::Io)?;
+        file.write_all(&bytes)?;
         Ok(())
     }
 
@@ -373,7 +372,7 @@ impl Pager {
 
     pub fn print_tree(&mut self) -> Result<(), PagerError> {
         let tree = self.create_tree().unwrap();
-        print_tree(&tree).map_err(PagerError::Io)?;
+        print_tree(&tree)?;
         Ok(())
     }
 }
