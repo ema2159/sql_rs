@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
+use std::io::{self, Seek};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -19,7 +19,7 @@ pub struct Database {
 #[derive(Error, Debug)]
 pub enum DatabaseError {
     #[error("Could not read database from disk. The following error occurred during read: {0}")]
-    ReadFromDiskError(#[from] io::Error),
+    Io(#[from] io::Error),
     #[error("Table already exists in database.")]
     DuplicateTable,
     #[error("Table does not exist in database.")]
@@ -37,7 +37,9 @@ impl Database {
 
     pub fn open(path_str: &str) -> Result<Self, DatabaseError> {
         let path = Path::new(path_str);
-        let file = RefCell::new(File::options().create(true).append(true).open(path)?).into();
+        let mut f = File::options().create(true).write(true).truncate(true).open(path)?;
+        f.seek(io::SeekFrom::Start(0))?;
+        let file = RefCell::new(f).into();
 
         let tables = HashMap::new();
 
