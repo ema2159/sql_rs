@@ -108,7 +108,7 @@ impl Pager {
                         return Err(PagerError::TableFull);
                     };
 
-                    let (mut page_left_split, page_right_split) = curr_page.split_page();
+                    let (mut page_left_split, page_right_split) = curr_page.split_page()?;
                     let left_split_last_key = page_left_split.get_last_key()?;
                     let new_page_number = self.get_unused_page_number();
                     self.num_pages += 1;
@@ -304,6 +304,7 @@ impl Pager {
         Ok(Page::new_from_read(file.deref_mut())?)
     }
 
+    #[instrument(parent = None, skip(self), level = "trace")]
     fn retrieve_page(&mut self, page_num: u32) -> Result<&mut Page, PagerError> {
         if !self.page_exists(page_num) {
             return Err(PagerError::PageNonExistent);

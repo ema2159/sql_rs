@@ -154,14 +154,6 @@ impl CellPtrArray {
     }
 
     #[instrument(parent = None, ret, level = "trace")]
-    fn split_cell_ptr_array(&mut self) -> (Self, Self) {
-        let mid_point = self.len() / 2;
-        let (left, right) = self.split_at(mid_point);
-
-        (left.into(), right.into())
-    }
-
-    #[instrument(parent = None, ret, level = "trace")]
     fn update_pointer_array_after_insert(
         &mut self,
         cell_ptr_array_start: &mut [u8],
@@ -355,51 +347,6 @@ impl Page {
         })
     }
 
-    #[instrument(parent = None, ret, level = "trace")]
-    pub fn new_from_split(
-        mut cell_pointers: CellPtrArray,
-        data: &[u8],
-        shift: usize,
-        page_type: PageType,
-    ) -> Self {
-        let mut new_page_bytes = Self::create_uninit_page_bytes();
-
-        let cells_start = PAGE_SIZE - data.len();
-        new_page_bytes[cells_start..].copy_from_slice(data);
-
-        // Adjust cell pointer array
-        cell_pointers
-            .iter_mut()
-            .for_each(|ptr| *ptr += shift as u16);
-
-        let mut header = PageHeader::default();
-        header.set_page_type(page_type, &mut new_page_bytes);
-        header.set_cells_start(cells_start as u16, &mut new_page_bytes);
-
-        let mut new_page = Self {
-            header,
-            data: new_page_bytes,
-            cell_pointer_array: cell_pointers,
-        };
-
-        // Write cell_pointer_array to new page bytes
-        new_page
-            .cell_pointer_array
-            .write_pointer_array(&mut new_page.data[PAGE_HEADER_SIZE..]);
-
-        // Write header fields to new page bytes
-        new_page.header.set_cells_start(
-            new_page.cell_pointer_array[0],
-            &mut new_page.data[..PAGE_HEADER_SIZE],
-        );
-        new_page.header.set_num_cells(
-            new_page.cell_pointer_array.len() as u16,
-            &mut new_page.data[..PAGE_HEADER_SIZE],
-        );
-
-        new_page
-    }
-
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn get_page_type(&self) -> &PageType {
         &self.header.page_type
@@ -437,8 +384,8 @@ impl Page {
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn get_next_page_pointer(&self, key: u64) -> Result<u32, PageError> {
-        let (partition, _) = self.find_partition(key)?;
-        if partition >= PAGE_SIZE {
+        let (partition, partition_key) = self.find_partition(key)?;
+        if partition_key.is_none() {
             return Ok(self.header.right_pointer);
         }
         let next_page_cell: DBCell = self.data[partition..]
@@ -515,6 +462,7 @@ impl Page {
             self.header.num_cells + 1,
             &mut self.data[..PAGE_HEADER_SIZE],
         );
+
         // Update cell pointer array
         self.cell_pointer_array.update_pointer_array_after_insert(
             &mut self.data[PAGE_HEADER_SIZE..],
@@ -563,7 +511,7 @@ impl Page {
             .try_into()
             .map_err(|_| PageError::CorruptData)?;
 
-        if cell_to_modify.id != key {
+        if cell_to_modify.key != key {
             return Err(PageError::UpdateNotSameKey(key));
         }
 
@@ -575,43 +523,30 @@ impl Page {
             .map_err(|_| PageError::InsertError)?
             .try_into()
             .map_err(|_| PageError::InsertError)?;
-        let _ = &self.data[partition_point..].copy_from_slice(&new_payload_bytes);
+
+        self.data[partition_point..].copy_from_slice(&new_payload_bytes);
 
         Ok(())
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    pub fn split_page(mut self) -> (Self, Self) {
-        let (left_ptr_array, right_ptr_array) = self.cell_pointer_array.split_cell_ptr_array();
-        let (left_cells, right_cells) = (
-            &self.data[left_ptr_array[0] as usize..right_ptr_array[0] as usize],
-            &self.data[right_ptr_array[0] as usize..],
-        );
-        let right_node_cells_start = (PAGE_SIZE - right_cells.len()) as u16;
+    pub fn split_page(self) -> Result<(Self, Self), PageError> {
+        let num_cells = self.cell_pointer_array.len();
 
-        // Create a new cell with the left-most records in the current Page, copying the records at
-        // the end of the Page, as well as creating a new Cells Pointer Array pointing to them.
-        let new_cell = Self::new_from_split(
-            left_ptr_array,
-            left_cells,
-            right_cells.len(),
-            *self.get_page_type(),
-        );
+        let mut left_split = Self::new(*self.get_page_type());
+        let mut right_split = Self::new(*self.get_page_type());
 
-        // Update cell pointer in current Page, leaving the right-most records in it. There is no
-        // need to copy or move the actual records, as they are already present in the Page. Also,
-        // update Page header
-        self.cell_pointer_array = right_ptr_array.clone();
-        self.cell_pointer_array
-            .write_pointer_array(&mut self.data[PAGE_HEADER_SIZE..]);
-        self.header.set_num_cells(
-            self.cell_pointer_array.len() as u16,
-            &mut self.data[..PAGE_HEADER_SIZE],
-        );
-        self.header
-            .set_cells_start(right_node_cells_start, &mut self.data[..PAGE_HEADER_SIZE]);
+        let cells_iter = self.cells_iter().flatten();
 
-        (new_cell, self)
+        for (i, cell) in cells_iter.enumerate() {
+            if i <= num_cells / 2 {
+                left_split.insert(cell.key, &cell.payload, Some(cell.left_child))?;
+            } else {
+                right_split.insert(cell.key, &cell.payload, Some(cell.left_child))?;
+            }
+        }
+
+        Ok((left_split, right_split))
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
