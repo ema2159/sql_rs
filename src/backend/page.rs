@@ -395,6 +395,30 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Removes the last record of an interior page and sets the page's right pointer to the
+    /// record's left child
+    /// Pre:
+    /// ``` text
+    ///         ┌─────────┌┐
+    ///         │ 0 3 6 9 ││
+    ///         └─────┬─┬─└┘
+    ///               │ │
+    ///     ┌─────────┘ └─────┐
+    /// ┌───▼───┌┐        ┌───▼───┌┐
+    /// │ 4 5 6 ││        │ 7 8 9 ││
+    /// └───────└┘        └───────└┘
+    /// ```
+    /// Post:
+    /// ``` text
+    ///         ┌───────┌┐
+    ///         │ 0 3 6 ││────┐
+    ///         └─────┬─└┘    │
+    ///               │       │
+    ///     ┌─────────┘       │
+    /// ┌───▼───┌┐        ┌───▼───┌┐
+    /// │ 4 5 6 ││        │ 7 8 9 ││
+    /// └───────└┘        └───────└┘
+    /// ```
     pub fn move_last_left_child_to_right_pointer(&mut self) -> Result<(), PageError> {
         if self.cell_pointer_array.len() == 0 {
             Err(PageError::CannotGetFirstOrLastKey)?
@@ -499,6 +523,13 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Updates a record in place, as long as the size of the old record matches the size of the
+    /// new record.
+    ///
+    /// * `key_index`: Index of the cell pointer that points to the record to update
+    /// * `key`: Key of the record to update
+    /// * `payload`: New payload of the record to update
+    /// * `left_child`: New left child of the record to update
     pub fn update_same_size(
         &mut self,
         key_index: usize,
@@ -530,6 +561,7 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Splits the current page into two halves, consuming it in the process.
     pub fn split_page(self) -> Result<(Self, Self), PageError> {
         let num_cells = self.cell_pointer_array.len();
 
@@ -550,13 +582,15 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Writes to the right pointer filed in the page's header
     pub fn set_right_pointer(&mut self, right_pointer: u32) {
         self.header
             .set_right_pointer(right_pointer, &mut self.data[..PAGE_HEADER_SIZE]);
     }
 
     #[instrument(parent = None, skip(self), level = "trace")]
-    pub fn cells_iter(&self) -> impl Iterator<Item = Result<DBCell, PageError>> + '_ {
+    /// Returns an iterator of [`DBCell`] with the cells in the current page.
+    fn cells_iter(&self) -> impl Iterator<Item = Result<DBCell, PageError>> + '_ {
         self.cell_pointer_array
             .iter()
             .map(|pointer| *pointer as usize)
@@ -569,6 +603,7 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), level = "trace")]
+    /// Returns an iterator with the pointers to the page's children.
     pub fn children_iter(&self) -> impl Iterator<Item = Result<u32, PageError>> + '_ {
         self.cells_iter()
             .map(|cell_result| match cell_result {
@@ -584,6 +619,7 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Returns an iterator of all the cells in the page deserialized
     pub fn rows_iter(&self) -> impl Iterator<Item = Result<Row, PageError>> + '_ {
         self.cell_pointer_array
             .iter()
