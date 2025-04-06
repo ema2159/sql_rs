@@ -12,7 +12,7 @@ use tracing::instrument;
 use super::cursor::DBCursor;
 use super::page::{Page, PageError, PageType, PAGE_SIZE};
 
-const TABLE_MAX_PAGES: usize = 100;
+pub const TABLE_MAX_PAGES: usize = 100;
 
 #[derive(Error, Debug)]
 pub enum PagerError {

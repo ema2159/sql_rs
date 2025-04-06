@@ -7,9 +7,12 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
+use super::pager::TABLE_MAX_PAGES;
+
 const PAYLOAD_SIZE_SIZE: usize = mem::size_of::<u16>();
 const ID_SIZE: usize = mem::size_of::<u64>();
 const LEFT_CHILD_SIZE: usize = mem::size_of::<u32>();
+pub const INVALID_PAGE_NUM: u32 = TABLE_MAX_PAGES as u32;
 
 #[derive(Error, Debug)]
 pub enum CellError {
@@ -35,7 +38,7 @@ impl DBCell {
 
     #[instrument(parent = None, level = "trace")]
     pub fn new(key: u64, data: &[u8], left_child_optn: Option<u32>) -> Result<Self, CellError> {
-        let left_child = left_child_optn.unwrap_or(0);
+        let left_child = left_child_optn.unwrap_or(INVALID_PAGE_NUM);
         Ok(Self {
             payload_size: data.len() as u16,
             key,
