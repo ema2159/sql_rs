@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+/// SQLite data types according to: <https://www.sqlite.org/datatype3.html>
 pub enum SQLType {
     UBigInt(u64),
     Integer(i32),
@@ -23,10 +24,10 @@ impl fmt::Display for SQLType {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-/// Row
+/// Byte serializable row used as records in the database
 ///
-/// * `rowid`: [TODO:parameter]
-/// * `attributes`: [TODO:parameter]
+/// * `rowid`: Unique identifier used to store the row as a record in the table
+/// * `attributes`: Vector containing the data attributes of the row
 pub struct Row {
     rowid: u64,
     attributes: Vec<SQLType>,
@@ -46,6 +47,7 @@ impl Row {
     }
 
     #[instrument(parent = None, ret, level = "trace")]
+    /// Returns an iterator with the string representation of the attributes in the database
     pub fn to_printable(&self) -> impl Iterator<Item = String> + '_ {
         self.attributes
             .iter()

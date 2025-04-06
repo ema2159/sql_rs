@@ -326,6 +326,9 @@ impl Page {
     }
 
     #[instrument(parent = None, level = "trace")]
+    /// Creates a page from a Read object i.e. a [File][std::fs::File] instance.
+    ///
+    /// * `read`: Instance of a type that implements the [Read][std::io::Read] trait.
     pub fn new_from_read<T>(read: &mut T) -> Result<Self, PageError>
     where
         T: Read + std::fmt::Debug,
@@ -353,6 +356,7 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Get a Vec with all the keys of the records in the page.
     fn get_keys(&self) -> Result<Vec<u64>, PageError> {
         let keys_res_iter = self
             .cell_pointer_array
@@ -363,6 +367,7 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Retrieve key of first record in the page
     pub fn get_first_key(&self) -> Result<u64, PageError> {
         if self.cell_pointer_array.len() == 0 {
             Err(PageError::CannotGetFirstOrLastKey)?
@@ -373,6 +378,7 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Retrieve key of last record in the page
     pub fn get_last_key(&self) -> Result<u64, PageError> {
         if self.cell_pointer_array.len() == 0 {
             Err(PageError::CannotGetFirstOrLastKey)?
@@ -383,6 +389,10 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// When performing a B-Tree traversal looking for a record, return the page number of the next
+    /// page that leads to the searched record.
+    ///
+    /// * `key`: Key of the record to find
     pub fn get_next_page_pointer(&self, key: u64) -> Result<u32, PageError> {
         let (partition, partition_key) = self.find_partition(key)?;
         if partition_key.is_none() {
@@ -434,6 +444,12 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Find partition in the sorted list of keys in which the specified key would be inserted.
+    /// Returns the respective partition point, as well as the current record in that partition. If
+    /// the partition point is at the very end, then None is returned instead of the current
+    /// record.
+    ///
+    /// * `new_key`: Key of which we want to find its partition.
     pub fn find_partition(&self, new_key: u64) -> Result<(usize, Option<u64>), PageError> {
         let keys = self.get_keys()?;
         let partition_key = keys.partition_point(|&key| key < new_key);
@@ -448,6 +464,12 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Insert record in page in order according to its key
+    ///
+    /// * `key`: Key of the record to insert.
+    /// * `payload`: Payload to be inserted in the page.
+    /// * `left_child`: Optional left child pointer of the record. If left_child is None, the
+    /// pointer will be set to [INVALID_PAGE_NUM][crate::backend::db_cell::INVALID_PAGE_NUM].
     pub fn insert(
         &mut self,
         key: u64,
@@ -498,6 +520,9 @@ impl Page {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    /// Deletes record from page at the specified position
+    ///
+    /// * `cell_ptr_pos`: The byte offset in the page that corresponds to the record
     pub fn delete(&mut self, cell_ptr_pos: usize) -> Result<(), PageError> {
         if self.cell_pointer_array.is_empty() {
             return Err(PageError::DeleteFromEmpty);
