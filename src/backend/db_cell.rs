@@ -7,12 +7,11 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use super::pager::TABLE_MAX_PAGES;
+use super::page::INVALID_PAGE_NUM;
 
 const PAYLOAD_SIZE_SIZE: usize = mem::size_of::<u16>();
 const ID_SIZE: usize = mem::size_of::<u64>();
 const LEFT_CHILD_SIZE: usize = mem::size_of::<u32>();
-pub const INVALID_PAGE_NUM: u32 = TABLE_MAX_PAGES as u32;
 
 #[derive(Error, Debug)]
 pub enum CellError {

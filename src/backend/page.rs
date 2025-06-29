@@ -10,10 +10,12 @@ use thiserror::Error;
 use tracing::instrument;
 
 use super::db_cell::DBCell;
+use super::pager::TABLE_MAX_PAGES;
 use super::row::Row;
 
 pub const PAGE_SIZE: usize = 4096;
 const PAGE_HEADER_SIZE: usize = mem::size_of::<PageHeader>();
+pub const INVALID_PAGE_NUM: u32 = TABLE_MAX_PAGES as u32;
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 /// Struct representing the page's header, with several methods to write to the page's header
@@ -317,6 +319,7 @@ impl Page {
         let mut header = PageHeader::default();
         header.set_page_type(page_type, &mut uninitialized_array);
         header.set_cells_start(PAGE_SIZE as u16, &mut uninitialized_array);
+        header.set_right_pointer(INVALID_PAGE_NUM, &mut uninitialized_array);
 
         Self {
             header,
@@ -637,7 +640,7 @@ impl Page {
             })
             .chain(std::iter::once(Ok(self.header.right_pointer)))
             .filter_map(|child_num| match child_num {
-                Ok(0) => None,
+                Ok(INVALID_PAGE_NUM) => None,
                 Ok(cell_num) => Some(Ok(cell_num)),
                 Err(err) => Some(Err(err)),
             })
