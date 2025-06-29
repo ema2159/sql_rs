@@ -16,8 +16,10 @@ pub const INVALID_PAGE_NUM: u32 = TABLE_MAX_PAGES as u32;
 
 #[derive(Error, Debug)]
 pub enum CellError {
-    #[error("Could not convert data into bytes to insert into cell.")]
-    DataToPayloadError,
+    #[error("Could encode data into cell: {0}")]
+    DataToPayload(#[from] bincode::error::EncodeError),
+    #[error("Could not decode data from cell: {0}")]
+    DataFromPayload(#[from] bincode::error::DecodeError),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -64,12 +66,11 @@ impl DBCell {
 }
 
 impl TryInto<Rc<[u8]>> for DBCell {
-    type Error = ();
+    type Error = CellError;
 
     fn try_into(self) -> Result<Rc<[u8]>, Self::Error> {
-        let cell_encoded =
-            bincode::serde::encode_to_vec::<DBCell, _>(self, Self::BINCODE_CONFIG)
-                .map_err(|_| ())?;
+        let cell_encoded = bincode::serde::encode_to_vec::<DBCell, _>(self, Self::BINCODE_CONFIG)
+            .map_err(CellError::DataToPayload)?;
 
         Ok(cell_encoded.into())
     }
