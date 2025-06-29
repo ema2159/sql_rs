@@ -10,6 +10,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 use super::cursor::DBCursor;
+use super::journal::Journal;
 use super::page::{Page, PageError, PageType, PAGE_SIZE};
 
 pub const TABLE_MAX_PAGES: usize = 100;
@@ -34,6 +35,7 @@ pub enum PagerError {
 pub struct Pager {
     num_pages: u32, // TODO: Needs to be a reference to a database element, not a per-table item
     pages_cache: [Option<Page>; TABLE_MAX_PAGES],
+    pages_journal: Journal,
     root_page_num: u32,
     file_ref: Rc<RefCell<File>>,
 }
@@ -48,6 +50,7 @@ impl Pager {
         Self {
             num_pages: 1,
             pages_cache,
+            pages_journal: Journal::default(),
             root_page_num,
             file_ref: file,
         }
@@ -101,7 +104,7 @@ impl Pager {
         if let Some(mut curr_page) = page_option.take() {
             match curr_page.insert(key, payload, left_child) {
                 Ok(()) => {
-                    self.page_write(curr_page, cursor.page_num as usize)?;
+                    self.page_cache(curr_page, cursor.page_num as usize)?;
                 }
                 Err(PageError::PageFull) => {
                     if self.num_pages as usize >= TABLE_MAX_PAGES {
@@ -198,7 +201,7 @@ impl Pager {
 
         new_root.set_right_pointer(right_split_page_number);
 
-        self.page_write(new_root, self.root_page_num as usize)?;
+        self.page_cache(new_root, self.root_page_num as usize)?;
         self.num_pages += 1;
 
         Ok((left_split_page_number, right_split_page_number))
@@ -261,7 +264,8 @@ impl Pager {
         // First modify parent page record to point to the right half of the page after the split
         let left_split_last_key = page_left_split.get_last_key()?;
         let left_split_page_number = cursor.page_num;
-        let (key_insert_position, curr_key_in_partition) = split_page_parent.find_partition(right_split_last_key)?;
+        let (key_insert_position, curr_key_in_partition) =
+            split_page_parent.find_partition(right_split_last_key)?;
         // TODO: Create a should insert in right pointer method
         if curr_key_in_partition.is_none() {
             split_page_parent.set_right_pointer(right_split_page_number);
@@ -340,9 +344,25 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
+    fn page_cache(&mut self, page: Page, page_idx: usize) -> Result<(), PagerError> {
+        self.pages_journal.log_page_change(page_idx);
+        self.pages_cache[page_idx] = Some(page);
+        Ok(())
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
     fn page_write(&mut self, page: Page, page_idx: usize) -> Result<(), PagerError> {
         self.pages_cache[page_idx] = Some(page);
         self.flush_page(page_idx)?;
+        Ok(())
+    }
+
+    #[instrument(parent = None, skip(self), ret, level = "trace")]
+    pub fn commit_pages(&mut self) -> Result<(), PagerError> {
+        for page_num in self.pages_journal.clone() {
+            self.flush_page(page_num)?;
+        }
+        self.pages_journal.clear();
         Ok(())
     }
 
@@ -383,9 +403,6 @@ impl Pager {
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn leaf_pages(&self) -> impl Iterator<Item = &Option<Page>> {
-        fn get_page_children(page: &Page) -> impl Iterator<Item = Result<u32, PageError>> + '_ {
-            page.children_iter()
-        }
         self.pages_cache.iter()
     }
 
@@ -397,6 +414,7 @@ impl Pager {
         ) -> Result<(), PagerError> {
             let page: &_ = pager.retrieve_page(page_num)?;
             tree_builder.begin_child(format!("{}{}", page_num, page));
+
             for child_num in page.children_iter().collect::<Vec<_>>() {
                 add_page_recursively(pager, tree_builder, child_num?)?
             }

@@ -67,6 +67,7 @@ impl Table {
             Err(PagerError::TableFull) => Err(TableError::TableFull),
             Err(other_err) => Err(TableError::RowInsertError(other_err)),
         }?;
+        self.pager.borrow_mut().commit_pages().map_err(TableError::FlushError)?;
         Ok(())
     }
 
