@@ -102,9 +102,11 @@ impl Pager {
             .ok_or(PagerError::PageIdxOutOfRange)?;
 
         if let Some(mut curr_page) = page_option.take() {
+            self.pages_journal
+                .log_page_change(cursor.page_num as usize, Some(&curr_page));
             match curr_page.insert(key, payload, left_child) {
                 Ok(()) => {
-                    self.page_cache(curr_page, cursor.page_num as usize)?;
+                    self.pages_cache[cursor.page_num as usize] = Some(curr_page);
                 }
                 Err(PageError::PageFull) => {
                     if self.num_pages as usize >= TABLE_MAX_PAGES {
@@ -147,8 +149,10 @@ impl Pager {
                     self.pages_cache[right_split_page_number as usize] = Some(page_right_split);
                     // Record still might be too large so it can retrigger a split
                     self.insert(cursor, key, payload, left_child)?;
-                    self.flush_page(left_split_page_number as usize)?;
-                    self.flush_page(right_split_page_number as usize)?;
+                    self.pages_journal
+                        .log_page_change(left_split_page_number as usize, None);
+                    self.pages_journal
+                        .log_page_change(right_split_page_number as usize, None);
                 }
                 Err(err) => {
                     self.pages_cache[cursor.page_num as usize] = Some(curr_page);
@@ -201,7 +205,7 @@ impl Pager {
 
         new_root.set_right_pointer(right_split_page_number);
 
-        self.page_cache(new_root, self.root_page_num as usize)?;
+        self.pages_cache[self.root_page_num as usize] = Some(new_root);
         self.num_pages += 1;
 
         Ok((left_split_page_number, right_split_page_number))
@@ -344,25 +348,12 @@ impl Pager {
     }
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
-    fn page_cache(&mut self, page: Page, page_idx: usize) -> Result<(), PagerError> {
-        self.pages_journal.log_page_change(page_idx);
-        self.pages_cache[page_idx] = Some(page);
-        Ok(())
-    }
-
-    #[instrument(parent = None, skip(self), ret, level = "trace")]
-    fn page_write(&mut self, page: Page, page_idx: usize) -> Result<(), PagerError> {
-        self.pages_cache[page_idx] = Some(page);
-        self.flush_page(page_idx)?;
-        Ok(())
-    }
-
-    #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn commit_pages(&mut self) -> Result<(), PagerError> {
-        for page_num in self.pages_journal.clone() {
+        let changed_pages = self.pages_journal.changed_page_nums().copied().collect::<Vec<_>>();
+        for page_num in changed_pages {
             self.flush_page(page_num)?;
         }
-        self.pages_journal.clear();
+        self.pages_journal = Journal::default();
         Ok(())
     }
 
@@ -398,11 +389,6 @@ impl Pager {
 
     #[instrument(parent = None, skip(self), ret, level = "trace")]
     pub fn pages(&self) -> impl Iterator<Item = &Option<Page>> {
-        self.pages_cache.iter()
-    }
-
-    #[instrument(parent = None, skip(self), ret, level = "trace")]
-    pub fn leaf_pages(&self) -> impl Iterator<Item = &Option<Page>> {
         self.pages_cache.iter()
     }
 
