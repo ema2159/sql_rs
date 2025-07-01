@@ -592,6 +592,7 @@ impl Page {
     /// Splits the current page into two halves, consuming it in the process.
     pub fn split_page(self) -> Result<(Self, Self), PageError> {
         let num_cells = self.cell_pointer_array.len();
+        let curr_right_pointer = self.header.right_pointer;
 
         let mut left_split = Self::new(*self.get_page_type());
         let mut right_split = Self::new(*self.get_page_type());
@@ -605,6 +606,8 @@ impl Page {
                 right_split.insert(cell.key, &cell.payload, Some(cell.left_child))?;
             }
         }
+
+        right_split.set_right_pointer(curr_right_pointer);
 
         Ok((left_split, right_split))
     }
